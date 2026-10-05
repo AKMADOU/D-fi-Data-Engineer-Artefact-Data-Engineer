@@ -1,4 +1,4 @@
-# Guide de démarrage — Levels 1, 2 et 3 
+# Guide de démarrage — Levels 1, 2 et 3 de A à Z
 
 Ce guide fait tourner les **3 premiers levels** sur ton ordinateur avec Docker, une
 étape après l'autre. Fais les étapes **dans l'ordre**. Chaque étape se termine par un
@@ -32,13 +32,12 @@ python3 --version
 
 ---
 
-## Étape 1 — Ouvrir le projet
+## Étape 1 — Récupérer le projet
 
-1. Dézippe `waba-lakehouse-level4.zip` (double-clic). Le Finder crée un dossier, par
-   exemple `waba-lakehouse` ou `waba-lakehouse 4`.
-2. Ouvre un terminal **dans ce dossier**. Mets des guillemets s'il y a un espace dans le nom :
+Clone le dépôt, puis entre dans le dossier :
 ```bash
-cd ~/Downloads/"waba-lakehouse 4"      
+git clone https://github.com/<ton-compte>/waba-lakehouse.git
+cd waba-lakehouse
 ls
 ```
 
@@ -335,4 +334,4 @@ Pour tout effacer et recommencer : retourne à l'**étape 2**.
 | Erreur de mot de passe MinIO ou Airflow | Anciennes données Docker → étape 2, puis tout dans l'ordre |
 
 Le Level 4 (Kubernetes, Superset, Grafana) se lance à part : voir la section
-« Level 4 » du `README.md`.
+« Level 4 » du `README_COMPLET.md`.

@@ -28,9 +28,27 @@ Plateforme data pour **WestAfrica BancAssur Group**, présent dans 8 pays
   - **OpenMetadata** : tables Gold documentées, PII tagués, lineage raw → Gold ;
   - **Prometheus, Loki, Grafana** : dashboard de santé et 3 alertes testées.
 
+```
+ Streamlit ──CSV──► MinIO raw-landing
+                        │  dag_ingest_raw (toutes les 15 min, détection de fichiers)
+                        ▼
+                  bronze.*  (brut validé, MERGE idempotent)          ┐
+                        │  asset → dag_bronze_to_silver                │  Iceberg (REST catalog)
+                        ▼                                              │  sur MinIO lakehouse
+                  silver.*  (dédupliqué, enrichi, EUR, pseudonymisé)  │
+                        │  asset → dag_silver_to_gold                  │  requêtable
+                        ▼                                              │  via Trino
+                  gold.*    (7 KPIs + reporting BCEAO/CIMA J+1)        ┘
+                        └──► MinIO regulatory-reports (CSV de déclaration)
 
- ![Architecture du lakehouse WABA](./Architecture.png)
-
+ Level 3 (speed layer), en parallèle du batch :
+ raw-landing ─► NiFi (ListS3 → FetchS3Object → CSV→JSON + ingestion_timestamp/source_file)
+            ─► Kafka raw-* ─► Spark Job 1 ─► silver-* (Kafka) + silver.rt_* (Iceberg)
+                                   └─► dlq-financial-events (rejets, orphelins)
+            silver-* ─► Spark Job 2 ─► gold-fraud-alerts / gold-aml-events / gold-liquidity-alerts
+                                        + gold.fraud_alerts / aml_events / liquidity_alerts (Iceberg)
+ Trino : gold.* (Iceberg)  ⟗  kafka.default."silver-bank-transactions"  → requête Lambda
+```
 
 | Service | URL | Identifiants |
 |---|---|---|
