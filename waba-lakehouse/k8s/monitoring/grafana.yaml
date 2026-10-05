@@ -1,0 +1,92 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: grafana-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: {requests: {storage: 2Gi}}      # historique des états d'alerte
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  labels: {app: grafana}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: grafana}
+  template:
+    metadata:
+      labels: {app: grafana}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3000"
+        prometheus.io/path: /metrics
+    spec:
+      securityContext: {runAsUser: 472, runAsGroup: 472, fsGroup: 472}
+      containers:
+        - name: grafana
+          image: grafana/grafana:13.0.10
+          env:
+            - {name: GF_SECURITY_ADMIN_USER, value: admin}
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom: {secretKeyRef: {name: grafana-env, key: GF_SECURITY_ADMIN_PASSWORD}}
+            - {name: GF_SERVER_ROOT_URL, value: "https://grafana.waba.local"}
+            - {name: GF_USERS_ALLOW_SIGN_UP, value: "false"}
+            - {name: GF_AUTH_ANONYMOUS_ENABLED, value: "false"}
+            - {name: GF_ANALYTICS_REPORTING_ENABLED, value: "false"}
+            - {name: GF_UNIFIED_ALERTING_ENABLED, value: "true"}
+          ports:
+            - {containerPort: 3000, name: http}
+          readinessProbe:
+            httpGet: {path: /api/health, port: 3000}
+            periodSeconds: 15
+          livenessProbe:
+            httpGet: {path: /api/health, port: 3000}
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {memory: 768Mi}
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/grafana}
+            - {name: datasources, mountPath: /etc/grafana/provisioning/datasources}
+            - {name: dashboard-providers, mountPath: /etc/grafana/provisioning/dashboards}
+            - {name: alerting, mountPath: /etc/grafana/provisioning/alerting}
+            - {name: dashboards, mountPath: /var/lib/grafana/dashboards}
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: grafana-data}
+        - name: datasources
+          configMap: {name: grafana-datasources}
+        - name: dashboard-providers
+          configMap: {name: grafana-dashboard-providers}
+        - name: alerting
+          configMap: {name: grafana-alerting}
+        - name: dashboards
+          configMap: {name: grafana-dashboards}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+spec:
+  selector: {app: grafana}
+  ports:
+    - {name: http, port: 3000, targetPort: 3000}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: monitoring
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [grafana.waba.local]
+      secretName: waba-tls
+  rules:
+    - host: grafana.waba.local
+      http:
+        paths:
+          - {path: /, pathType: Prefix, backend: {service: {name: grafana, port: {number: 3000}}}}

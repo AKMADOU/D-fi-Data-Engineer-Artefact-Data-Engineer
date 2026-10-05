@@ -1,0 +1,165 @@
+# 3 alertes de l'énoncé 4.4 (provisionnées, non modifiables dans l'UI).
+apiVersion: 1
+groups:
+- orgId: 1
+  name: waba-pipelines
+  folder: WABA
+  interval: 30s
+  rules:
+  - uid: waba-spark-fraud-down
+    title: Job Spark de détection de fraude en erreur > 5 min
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        refId: A
+        expr: clamp_max((((max(up{app="stream-gold"}) or vector(0)) < bool 1) + ((time()
+          - (max(waba_stream_last_progress_timestamp_seconds{stream_job="silver_to_gold"})
+          or vector(0))) > bool 120)), 1)
+        instant: true
+        range: false
+        intervalMs: 1000
+        maxDataPoints: 43200
+    - refId: B
+      datasourceUid: __expr__
+      model:
+        refId: B
+        type: reduce
+        expression: A
+        reducer: last
+        settings:
+          mode: replaceNN
+          replaceWithValue: 0
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: B
+        conditions:
+        - evaluator:
+            type: gt
+            params:
+            - 0
+    noDataState: Alerting
+    execErrState: Error
+    for: 5m
+    annotations:
+      summary: Le job stream-gold (fraude / AML / liquidité) est arrêté ou ne progresse
+        plus
+      description: 'Pod stream-gold absent/non joignable ou aucune progression Structured
+        Streaming depuis 2 min, pendant 5 min. Vérifier : kubectl -n processing logs
+        deploy/stream-gold'
+      runbook_url: https://github.com/waba/waba-lakehouse/blob/main/docs/ARCHITECTURE_L4.md#alertes
+    labels:
+      severity: critical
+      team: data-platform
+    isPaused: false
+  - uid: waba-aml-consumer-lag
+    title: 'Consumer Kafka AML : lag > 5 000 messages'
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        refId: A
+        expr: sum(waba_stream_kafka_lag_messages{stream_job="silver_to_gold",query="event_rules"})
+          or vector(0)
+        instant: true
+        range: false
+        intervalMs: 1000
+        maxDataPoints: 43200
+    - refId: B
+      datasourceUid: __expr__
+      model:
+        refId: B
+        type: reduce
+        expression: A
+        reducer: last
+        settings:
+          mode: replaceNN
+          replaceWithValue: 0
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: B
+        conditions:
+        - evaluator:
+            type: gt
+            params:
+            - 5000
+    noDataState: OK
+    execErrState: Error
+    for: 1m
+    annotations:
+      summary: 'Retard du consommateur AML : {{ $values.B }} messages en attente'
+      description: La requête event_rules (règles AML + fraude sans état) accumule
+        plus de 5 000 messages non traités sur les topics silver-*. Les déclarations
+        AML risquent d'être tardives.
+      runbook_url: https://github.com/waba/waba-lakehouse/blob/main/docs/ARCHITECTURE_L4.md#alertes
+    labels:
+      severity: warning
+      team: data-platform
+    isPaused: false
+  - uid: waba-regulatory-report-failed
+    title: dag_regulatory_report en échec à J+1 06h00 UTC
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        refId: A
+        expr: clamp_max((hour() >= bool 6) * ((max(waba_dag_last_success_timestamp_seconds{dag_id="dag_regulatory_report"})
+          or vector(0)) < bool (time() - time() % 86400)) + ((max(waba_dag_last_failure_timestamp_seconds{dag_id="dag_regulatory_report"})
+          or vector(0)) > bool (max(waba_dag_last_success_timestamp_seconds{dag_id="dag_regulatory_report"})
+          or vector(0))), 1)
+        instant: true
+        range: false
+        intervalMs: 1000
+        maxDataPoints: 43200
+    - refId: B
+      datasourceUid: __expr__
+      model:
+        refId: B
+        type: reduce
+        expression: A
+        reducer: last
+        settings:
+          mode: replaceNN
+          replaceWithValue: 0
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: B
+        conditions:
+        - evaluator:
+            type: gt
+            params:
+            - 0
+    noDataState: OK
+    execErrState: Error
+    for: 0s
+    annotations:
+      summary: Le reporting réglementaire BCEAO / CIMA du jour n'est pas disponible
+      description: Après 06h00 UTC, aucun succès de dag_regulatory_report depuis minuit
+        UTC, ou le dernier run est en échec. Les déclarations J+1 aux régulateurs
+        sont en retard.
+      runbook_url: https://github.com/waba/waba-lakehouse/blob/main/docs/ARCHITECTURE_L4.md#alertes
+    labels:
+      severity: critical
+      team: data-platform
+    isPaused: false

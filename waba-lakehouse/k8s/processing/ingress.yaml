@@ -1,0 +1,14 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: processing
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [airflow.waba.local]
+      secretName: waba-tls
+  rules:
+    - host: airflow.waba.local
+      http:
+        paths:
+          - {path: /, pathType: Prefix, backend: {service: {name: airflow-apiserver, port: {number: 8080}}}}

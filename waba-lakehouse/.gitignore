@@ -1,0 +1,14 @@
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+*.egg-info/
+.DS_Store
+data/
+spark-warehouse/
+metastore_db/
+
+# Level 4 (Kubernetes) : secrets générés localement, jamais versionnés
+k8s/.generated/
+k8s/secrets.env

@@ -1,0 +1,99 @@
+# =============================================================================
+# WABA Lakehouse — Level 4 : TOUTE la plateforme sur Kubernetes en une commande
+#
+#     make k8s-up                                   (minikube + images + secrets + apply)
+#   ou, une fois les images construites et les secrets générés :
+#     kubectl apply --server-side -k .
+#
+# --server-side : les CRD du Spark Operator dépassent la taille d'annotation du mode client.
+# Ce fichier est à la racine pour pouvoir embarquer, sans les dupliquer, les fichiers
+# partagés avec docker compose (flux NiFi, topics Kafka, tables Kafka de Trino,
+# configuration Superset, script de gouvernance).
+# Les Secrets sont générés depuis k8s/.generated/ (hors git) : aucun secret en clair ici.
+# =============================================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - k8s/namespaces.yaml
+  - k8s/ingestion
+  - k8s/processing
+  - k8s/serving
+  - k8s/governance
+  - k8s/monitoring
+
+# Profil de ressources (full | light), choisi par scripts/k8s/make_secrets.py --profile :
+# Component généré dans k8s/.generated/profile (patchs de k8s/profiles/light/patches.yaml).
+components:
+  - k8s/.generated/profile
+
+generatorOptions:
+  disableNameSuffixHash: true      # noms stables, référencés par les variables d'environnement
+
+configMapGenerator:
+  - name: nifi-provision
+    namespace: ingestion
+    files: [nifi/provision.py]
+  - name: kafka-topics
+    namespace: ingestion
+    files: [kafka/create-topics.sh]
+  - name: trino-kafka-tables
+    namespace: serving
+    files:
+      - trino/etc/kafka/raw-bank-transactions.json
+      - trino/etc/kafka/raw-insurance-operations.json
+      - trino/etc/kafka/raw-mobile-money-payments.json
+      - trino/etc/kafka/raw-loan-repayments.json
+      - trino/etc/kafka/silver-bank-transactions.json
+      - trino/etc/kafka/silver-insurance-operations.json
+      - trino/etc/kafka/silver-mobile-money.json
+      - trino/etc/kafka/silver-loan-repayments.json
+      - trino/etc/kafka/gold-fraud-alerts.json
+      - trino/etc/kafka/gold-aml-events.json
+      - trino/etc/kafka/gold-liquidity-alerts.json
+      - trino/etc/kafka/dlq-financial-events.json
+  - name: superset-config
+    namespace: serving
+    files: [superset/superset_config.py]
+  - name: openmetadata-governance
+    namespace: governance
+    files: [governance/openmetadata_bootstrap.py]
+
+secretGenerator:
+  # --- ingestion
+  - {name: ingestion-env, namespace: ingestion, envs: [k8s/.generated/ingestion-env.env]}
+  - name: waba-tls
+    namespace: ingestion
+    type: kubernetes.io/tls
+    files: [tls.crt=k8s/.generated/tls.crt, tls.key=k8s/.generated/tls.key]
+  # --- processing
+  - {name: waba-spark-env, namespace: processing, envs: [k8s/.generated/waba-spark-env.env]}
+  - {name: airflow-env, namespace: processing, envs: [k8s/.generated/airflow-env.env]}
+  - {name: airflow-passwords, namespace: processing, files: [passwords.json=k8s/.generated/passwords.json]}
+  - name: waba-tls
+    namespace: processing
+    type: kubernetes.io/tls
+    files: [tls.crt=k8s/.generated/tls.crt, tls.key=k8s/.generated/tls.key]
+  # --- serving
+  - {name: trino-env, namespace: serving, envs: [k8s/.generated/trino-env.env]}
+  - {name: trino-auth, namespace: serving, files: [password.db=k8s/.generated/password.db]}
+  - {name: trino-tls, namespace: serving, files: [trino.pem=k8s/.generated/trino.pem]}
+  - {name: superset-env, namespace: serving, envs: [k8s/.generated/superset-env.env]}
+  - name: waba-tls
+    namespace: serving
+    type: kubernetes.io/tls
+    files: [tls.crt=k8s/.generated/tls.crt, tls.key=k8s/.generated/tls.key]
+  # --- governance
+  - {name: governance-env, namespace: governance, envs: [k8s/.generated/governance-env.env]}
+  - {name: keycloak-env, namespace: governance, envs: [k8s/.generated/keycloak-env.env]}
+  - name: waba-tls
+    namespace: governance
+    type: kubernetes.io/tls
+    files: [tls.crt=k8s/.generated/tls.crt, tls.key=k8s/.generated/tls.key]
+  # --- monitoring
+  - {name: grafana-env, namespace: monitoring, envs: [k8s/.generated/grafana-env.env]}
+  - {name: monitoring-scrape, namespace: monitoring, files: [trino-password=k8s/.generated/trino-password]}
+  - name: waba-tls
+    namespace: monitoring
+    type: kubernetes.io/tls
+    files: [tls.crt=k8s/.generated/tls.crt, tls.key=k8s/.generated/tls.key]

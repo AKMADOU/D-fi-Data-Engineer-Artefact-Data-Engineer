@@ -1,0 +1,126 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: loki
+  labels: {app: loki}
+spec:
+  serviceName: loki
+  replicas: 1
+  selector:
+    matchLabels: {app: loki}
+  template:
+    metadata:
+      labels: {app: loki}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3100"
+        prometheus.io/path: /metrics
+    spec:
+      securityContext: {runAsUser: 10001, runAsGroup: 10001, fsGroup: 10001}
+      containers:
+        - name: loki
+          image: grafana/loki:3.5.12
+          args: ["-config.file=/etc/loki/loki.yaml"]
+          ports:
+            - {containerPort: 3100, name: http}
+          readinessProbe:
+            httpGet: {path: /ready, port: 3100}
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          livenessProbe:
+            tcpSocket: {port: 3100}
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {memory: 1Gi}
+          volumeMounts:
+            - {name: config, mountPath: /etc/loki}
+            - {name: data, mountPath: /loki}
+      volumes:
+        - name: config
+          configMap: {name: loki-config}
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: {requests: {storage: 10Gi}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: loki
+spec:
+  selector: {app: loki}
+  ports:
+    - {name: http, port: 3100, targetPort: 3100}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: promtail
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: waba-promtail
+rules:
+  - apiGroups: [""]
+    resources: [nodes, nodes/proxy, services, endpoints, pods]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: waba-promtail
+subjects:
+  - kind: ServiceAccount
+    name: promtail
+    namespace: monitoring
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: waba-promtail
+---
+# Promtail (collecteur de l'énoncé). Remarque : Grafana annonce Alloy comme successeur ;
+# la configuration de collecte se transpose telle quelle (voir docs/ARCHITECTURE_L4.md).
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: promtail
+  labels: {app: promtail}
+spec:
+  selector:
+    matchLabels: {app: promtail}
+  template:
+    metadata:
+      labels: {app: promtail}
+    spec:
+      serviceAccountName: promtail
+      containers:
+        - name: promtail
+          image: grafana/promtail:3.6.11
+          args: ["-config.file=/etc/promtail/promtail.yaml"]
+          env:
+            - name: HOSTNAME
+              valueFrom: {fieldRef: {fieldPath: spec.nodeName}}
+          ports:
+            - {containerPort: 9080, name: http}
+          readinessProbe:
+            httpGet: {path: /ready, port: 9080}
+            periodSeconds: 15
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {memory: 256Mi}
+          securityContext: {readOnlyRootFilesystem: true}
+          volumeMounts:
+            - {name: config, mountPath: /etc/promtail}
+            - {name: run, mountPath: /run/promtail}
+            - {name: pods, mountPath: /var/log/pods, readOnly: true}
+      volumes:
+        - name: config
+          configMap: {name: promtail-config}
+        - name: run
+          hostPath: {path: /run/promtail}
+        - name: pods
+          hostPath: {path: /var/log/pods}

@@ -1,0 +1,7 @@
+compliance_officer:conformite
+country_CI:analyste.ci
+country_GH:analyste.gh
+country_analyst:analyste.ci,analyste.gh
+group_admin:admin,admin.groupe
+service:openmetadata,prometheus,superset
+viewer:lecteur

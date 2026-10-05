@@ -1,0 +1,222 @@
+# OpenMetadata 1.13 : Elasticsearch (index de recherche) + serveur + Job de gouvernance.
+apiVersion: v1
+kind: Service
+metadata:
+  name: elasticsearch
+spec:
+  selector: {app: elasticsearch}
+  ports:
+    - {name: http, port: 9200, targetPort: 9200}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: elasticsearch
+  labels: {app: elasticsearch}
+spec:
+  serviceName: elasticsearch
+  replicas: 1
+  selector:
+    matchLabels: {app: elasticsearch}
+  template:
+    metadata:
+      labels: {app: elasticsearch}
+    spec:
+      securityContext: {fsGroup: 1000}
+      initContainers:
+        # Prérequis Elasticsearch sur le nœud (minikube)
+        - name: max-map-count
+          image: busybox:1.37
+          command: ["sh", "-c", "sysctl -w vm.max_map_count=262144 || true"]
+          securityContext: {privileged: true}
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {memory: 32Mi}
+      containers:
+        - name: elasticsearch
+          image: docker.elastic.co/elasticsearch/elasticsearch:9.3.0
+          env:
+            - {name: discovery.type, value: single-node}
+            - {name: ES_JAVA_OPTS, value: "-Xms1g -Xmx1g"}
+            - {name: xpack.security.enabled, value: "false"}
+          ports:
+            - {containerPort: 9200, name: http}
+          readinessProbe:
+            httpGet: {path: "/_cluster/health?local=true", port: 9200}
+            periodSeconds: 15
+            initialDelaySeconds: 20
+          livenessProbe:
+            tcpSocket: {port: 9200}
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          resources:
+            requests: {cpu: 250m, memory: 1536Mi}
+            limits: {memory: 2Gi}
+          volumeMounts:
+            - {name: data, mountPath: /usr/share/elasticsearch/data}
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: {requests: {storage: 5Gi}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openmetadata-config
+data:
+  SERVER_PORT: "8585"
+  SERVER_ADMIN_PORT: "8586"
+  SERVER_HOST_API_URL: http://openmetadata.governance.svc.cluster.local:8585/api
+  OPENMETADATA_CLUSTER_NAME: waba
+  AUTHENTICATION_PROVIDER: basic
+  AUTHORIZER_ADMIN_PRINCIPALS: "[admin]"
+  AUTHORIZER_PRINCIPAL_DOMAIN: open-metadata.org
+  DB_DRIVER_CLASS: org.postgresql.Driver
+  DB_SCHEME: postgresql
+  DB_PARAMS: "sslmode=disable"
+  DB_USER: openmetadata_user
+  DB_HOST: governance-db
+  DB_PORT: "5432"
+  OM_DATABASE: openmetadata_db
+  ELASTICSEARCH_HOST: elasticsearch
+  ELASTICSEARCH_PORT: "9200"
+  ELASTICSEARCH_SCHEME: http
+  SEARCH_TYPE: elasticsearch
+  # Ingestion lancée par un Job Kubernetes (CLI `metadata`), pas par l'Airflow embarqué
+  PIPELINE_SERVICE_CLIENT_ENABLED: "false"
+  EVENT_MONITOR: prometheus
+  OPENMETADATA_HEAP_OPTS: "-Xmx1G -Xms1G"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openmetadata
+  labels: {app: openmetadata}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: openmetadata}
+  template:
+    metadata:
+      labels: {app: openmetadata}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8586"
+        prometheus.io/path: /prometheus
+    spec:
+      initContainers:
+        # Migrations du schéma (idempotent)
+        - name: migrate
+          image: openmetadata/server:1.13.6
+          command: ["./bootstrap/openmetadata-ops.sh", "migrate"]
+          envFrom:
+            - configMapRef: {name: openmetadata-config}
+          env:
+            - name: DB_USER_PASSWORD
+              valueFrom: {secretKeyRef: {name: governance-env, key: DB_USER_PASSWORD}}
+          resources:
+            requests: {cpu: 200m, memory: 768Mi}
+            limits: {memory: 1536Mi}
+      containers:
+        - name: openmetadata
+          image: openmetadata/server:1.13.6
+          envFrom:
+            - configMapRef: {name: openmetadata-config}
+          env:
+            - name: DB_USER_PASSWORD
+              valueFrom: {secretKeyRef: {name: governance-env, key: DB_USER_PASSWORD}}
+          ports:
+            - {containerPort: 8585, name: http}
+            - {containerPort: 8586, name: admin}
+          startupProbe:
+            httpGet: {path: /healthcheck, port: 8586}
+            periodSeconds: 10
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: {path: /healthcheck, port: 8586}
+            periodSeconds: 15
+          livenessProbe:
+            httpGet: {path: /healthcheck, port: 8586}
+            periodSeconds: 30
+            failureThreshold: 4
+          resources:
+            requests: {cpu: 300m, memory: 1536Mi}
+            limits: {memory: 2Gi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: openmetadata
+spec:
+  selector: {app: openmetadata}
+  ports:
+    - {name: http, port: 8585, targetPort: 8585}
+    - {name: admin, port: 8586, targetPort: 8586}
+---
+# Gouvernance : ingestion Trino + Kafka, puis documentation, PII, glossaire et lineage.
+# Toutes les heures (nouvelles tables) ; à la demande : make k8s-governance.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: openmetadata-governance
+spec:
+  schedule: "17 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 3
+      template:
+        spec:
+          restartPolicy: Never
+          initContainers:
+            - name: prepare
+              image: python:3.12-alpine
+              command: ["python", "/scripts/openmetadata_bootstrap.py", "prepare"]
+              env:
+                - {name: WORK_DIR, value: /work}
+                - name: TRINO_OPENMETADATA_PASSWORD
+                  valueFrom: {secretKeyRef: {name: governance-env, key: TRINO_OPENMETADATA_PASSWORD}}
+                - name: OM_ADMIN_PASSWORD
+                  valueFrom: {secretKeyRef: {name: governance-env, key: OM_ADMIN_PASSWORD, optional: true}}
+              resources:
+                requests: {cpu: 20m, memory: 64Mi}
+                limits: {memory: 128Mi}
+              volumeMounts:
+                - {name: scripts, mountPath: /scripts}
+                - {name: work, mountPath: /work}
+            - name: ingest-trino
+              image: openmetadata/ingestion:1.13.6
+              command: ["bash", "-c", "metadata ingest -c /work/trino.yaml"]
+              resources:
+                requests: {cpu: 200m, memory: 768Mi}
+                limits: {memory: 1536Mi}
+              volumeMounts:
+                - {name: work, mountPath: /work}
+            - name: ingest-kafka
+              image: openmetadata/ingestion:1.13.6
+              command: ["bash", "-c", "metadata ingest -c /work/kafka.yaml"]
+              resources:
+                requests: {cpu: 100m, memory: 512Mi}
+                limits: {memory: 1Gi}
+              volumeMounts:
+                - {name: work, mountPath: /work}
+          containers:
+            - name: govern
+              image: python:3.12-alpine
+              command: ["python", "/scripts/openmetadata_bootstrap.py", "govern"]
+              env:
+                - name: OM_ADMIN_PASSWORD
+                  valueFrom: {secretKeyRef: {name: governance-env, key: OM_ADMIN_PASSWORD, optional: true}}
+              resources:
+                requests: {cpu: 20m, memory: 64Mi}
+                limits: {memory: 128Mi}
+              volumeMounts:
+                - {name: scripts, mountPath: /scripts}
+          volumes:
+            - name: scripts
+              configMap: {name: openmetadata-governance}
+            - name: work
+              emptyDir: {}

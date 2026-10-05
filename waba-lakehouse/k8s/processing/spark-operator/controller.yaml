@@ -1,0 +1,161 @@
+# Contrôleur Kubeflow Spark Operator v2.5.2 — rendu du chart officiel (values : webhook
+# désactivé, jobNamespaces=[processing], métriques Prometheus actives). Les CRD de ce
+# dossier sont copiées telles quelles depuis le chart (spark-operator-2.5.2.tgz).
+# Sans webhook, l'injection des variables d'environnement passe par un pod template
+# (spec.driver.template), fonctionnalité native de Spark.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: spark-operator-controller
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: waba-spark-operator-controller
+rules:
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [get, list, watch]
+  - apiGroups: [apiextensions.k8s.io]
+    resources: [customresourcedefinitions]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: waba-spark-operator-controller
+subjects:
+  - kind: ServiceAccount
+    name: spark-operator-controller
+    namespace: processing
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: waba-spark-operator-controller
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: spark-operator-controller
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch, create, update, delete]
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [get, list, watch, create, update, patch]
+  - apiGroups: [""]
+    resources: [services]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, update, patch]
+  - apiGroups: [extensions, networking.k8s.io]
+    resources: [ingresses]
+    verbs: [get, create, update, delete]
+  - apiGroups: [sparkoperator.k8s.io]
+    resources: [sparkapplications]
+    verbs: [get, list, watch, create, delete]
+  - apiGroups: [sparkoperator.k8s.io]
+    resources: [scheduledsparkapplications, sparkconnects]
+    verbs: [get, list, watch]
+  - apiGroups: [sparkoperator.k8s.io]
+    resources: [sparkapplications/status, sparkconnects/status, scheduledsparkapplications/status]
+    verbs: [update]
+  - apiGroups: [sparkoperator.k8s.io]
+    resources: [sparkapplications/finalizers, scheduledsparkapplications/finalizers, sparkconnects/finalizers]
+    verbs: [update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: spark-operator-controller
+subjects:
+  - kind: ServiceAccount
+    name: spark-operator-controller
+    namespace: processing
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: spark-operator-controller
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spark-operator-controller
+  labels: {app: spark-operator}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: spark-operator}
+  template:
+    metadata:
+      labels: {app: spark-operator}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: /metrics
+    spec:
+      serviceAccountName: spark-operator-controller
+      securityContext: {runAsNonRoot: true, fsGroup: 185}
+      containers:
+        - name: spark-operator-controller
+          image: ghcr.io/kubeflow/spark-operator/controller:2.5.2
+          imagePullPolicy: IfNotPresent
+          args:
+            - controller
+            - start
+            - --zap-log-level=info
+            - --zap-encoder=json
+            - --namespaces=processing
+            - --controller-threads=10
+            - --enable-ui-service=true
+            - --enable-metrics=true
+            - --metrics-bind-address=:8080
+            - --metrics-endpoint=/metrics
+            - --metrics-prefix=
+            - --metrics-labels=app_type
+            - --leader-election=false
+            - --workqueue-ratelimiter-bucket-qps=50
+            - --workqueue-ratelimiter-bucket-size=500
+            - --feature-gates=PartialRestart=false,LoadSparkDefaults=false
+          ports:
+            - {name: metrics, containerPort: 8080}
+          livenessProbe:
+            httpGet: {port: 8081, path: /healthz}
+          readinessProbe:
+            httpGet: {port: 8081, path: /readyz}
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {memory: 512Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+---
+# Compte de service des pods driver Spark (crée ses executors, ConfigMaps, Services)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: spark
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: spark
+rules:
+  - apiGroups: [""]
+    resources: [pods, configmaps, persistentvolumeclaims, services]
+    verbs: [get, list, watch, create, update, patch, delete, deletecollection]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: spark
+subjects:
+  - kind: ServiceAccount
+    name: spark
+    namespace: processing
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: spark

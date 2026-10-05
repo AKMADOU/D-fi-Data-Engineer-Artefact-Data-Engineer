@@ -1,0 +1,64 @@
+{
+  "tableName": "raw-loan-repayments",
+  "schemaName": "default",
+  "topicName": "raw-loan-repayments",
+  "message": {
+    "dataFormat": "json",
+    "fields": [
+      {
+        "name": "repayment_id",
+        "mapping": "repayment_id",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "timestamp",
+        "mapping": "timestamp",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "country_code",
+        "mapping": "country_code",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "repayment_status",
+        "mapping": "repayment_status",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "amount_due",
+        "mapping": "amount_due",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "amount_paid",
+        "mapping": "amount_paid",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "currency",
+        "mapping": "currency",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "ingestion_timestamp",
+        "mapping": "ingestion_timestamp",
+        "type": "TIMESTAMP",
+        "dataFormat": "custom-date-time",
+        "formatHint": "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
+      },
+      {
+        "name": "source_file",
+        "mapping": "source_file",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "landed_at",
+        "mapping": "landed_at",
+        "type": "TIMESTAMP",
+        "dataFormat": "custom-date-time",
+        "formatHint": "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
+      }
+    ]
+  }
+}

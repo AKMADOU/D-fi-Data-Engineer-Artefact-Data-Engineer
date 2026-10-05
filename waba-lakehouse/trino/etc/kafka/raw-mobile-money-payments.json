@@ -1,0 +1,69 @@
+{
+  "tableName": "raw-mobile-money-payments",
+  "schemaName": "default",
+  "topicName": "raw-mobile-money-payments",
+  "message": {
+    "dataFormat": "json",
+    "fields": [
+      {
+        "name": "payment_id",
+        "mapping": "payment_id",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "timestamp",
+        "mapping": "timestamp",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "sender_country",
+        "mapping": "sender_country",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "receiver_country",
+        "mapping": "receiver_country",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "payment_type",
+        "mapping": "payment_type",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "amount",
+        "mapping": "amount",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "currency",
+        "mapping": "currency",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "status",
+        "mapping": "status",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "ingestion_timestamp",
+        "mapping": "ingestion_timestamp",
+        "type": "TIMESTAMP",
+        "dataFormat": "custom-date-time",
+        "formatHint": "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
+      },
+      {
+        "name": "source_file",
+        "mapping": "source_file",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "landed_at",
+        "mapping": "landed_at",
+        "type": "TIMESTAMP",
+        "dataFormat": "custom-date-time",
+        "formatHint": "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
+      }
+    ]
+  }
+}

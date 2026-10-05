@@ -1,0 +1,16 @@
+{
+  "_comment": "Source unique des comptes de démonstration : sert à générer le realm Keycloak et le fichier de groupes Trino (scripts/k8s/make_secrets.py). Mot de passe commun : WABA_DEMO_PASSWORD (k8s/secrets.env).",
+  "users": [
+    {"username": "admin.groupe", "firstName": "Awa", "lastName": "Koné", "roles": ["group_admin"]},
+    {"username": "analyste.ci", "firstName": "Koffi", "lastName": "Yao", "roles": ["country_analyst", "country_CI"]},
+    {"username": "analyste.gh", "firstName": "Kwame", "lastName": "Mensah", "roles": ["country_analyst", "country_GH"]},
+    {"username": "conformite", "firstName": "Fatou", "lastName": "Diop", "roles": ["compliance_officer"]},
+    {"username": "lecteur", "firstName": "Moussa", "lastName": "Traoré", "roles": ["viewer"]}
+  ],
+  "service_accounts": {
+    "superset": "Superset (impersonation des utilisateurs SSO)",
+    "prometheus": "Collecte de /metrics",
+    "openmetadata": "Ingestion des métadonnées"
+  },
+  "countries": ["CI", "SN", "ML", "BF", "GN", "TG", "BJ", "GH"]
+}

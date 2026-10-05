@@ -1,0 +1,20 @@
+# Notifications : récepteur webhook interne (journalise chaque alerte, visible dans Loki).
+apiVersion: 1
+contactPoints:
+- orgId: 1
+  name: waba-webhook
+  receivers:
+  - uid: waba-webhook
+    type: webhook
+    disableResolveMessage: false
+    settings:
+      url: http://alert-webhook.monitoring.svc.cluster.local:8080/alert
+      httpMethod: POST
+policies:
+- orgId: 1
+  receiver: waba-webhook
+  group_by:
+  - alertname
+  group_wait: 10s
+  group_interval: 1m
+  repeat_interval: 1h

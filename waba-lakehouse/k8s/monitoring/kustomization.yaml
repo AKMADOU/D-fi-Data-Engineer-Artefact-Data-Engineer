@@ -1,0 +1,34 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: monitoring
+labels:
+  - pairs: {app.kubernetes.io/part-of: waba, waba/domain: monitoring}
+    includeSelectors: false
+resources:
+  - prometheus.yaml
+  - exporters.yaml
+  - loki.yaml
+  - grafana.yaml
+generatorOptions:
+  disableNameSuffixHash: true
+configMapGenerator:
+  - name: prometheus-config
+    files: [prometheus/prometheus.yml]
+  - name: statsd-mapping
+    files: [prometheus/statsd-mapping.yml]
+  - name: loki-config
+    files: [loki/loki.yaml]
+  - name: promtail-config
+    files: [loki/promtail.yaml]
+  - name: alert-webhook
+    files: [alert-webhook/receiver.py]
+  - name: grafana-datasources
+    files: [grafana/provisioning/datasources.yaml]
+  - name: grafana-dashboard-providers
+    files: [grafana/provisioning/dashboards.yaml]
+  - name: grafana-alerting
+    files:
+      - grafana/provisioning/alerting.yaml
+      - grafana/provisioning/contactpoints.yaml
+  - name: grafana-dashboards
+    files: [grafana/dashboards/pipeline-health.json]

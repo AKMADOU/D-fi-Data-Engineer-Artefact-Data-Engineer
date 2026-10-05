@@ -1,0 +1,111 @@
+{
+  "tableName": "silver-mobile-money",
+  "schemaName": "default",
+  "topicName": "silver-mobile-money",
+  "message": {
+    "dataFormat": "json",
+    "fields": [
+      {
+        "name": "payment_id",
+        "mapping": "payment_id",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "event_time",
+        "mapping": "timestamp",
+        "type": "TIMESTAMP",
+        "dataFormat": "custom-date-time",
+        "formatHint": "yyyy-MM-dd'T'HH:mm:ss.SSS"
+      },
+      {
+        "name": "country_code",
+        "mapping": "country_code",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "sender_country",
+        "mapping": "sender_country",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "receiver_country",
+        "mapping": "receiver_country",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "sender_home_country",
+        "mapping": "sender_home_country",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "payment_type",
+        "mapping": "payment_type",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "operator",
+        "mapping": "operator",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "status",
+        "mapping": "status",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "is_success",
+        "mapping": "is_success",
+        "type": "BOOLEAN"
+      },
+      {
+        "name": "amount",
+        "mapping": "amount",
+        "type": "DOUBLE"
+      },
+      {
+        "name": "currency",
+        "mapping": "currency",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "amount_eur",
+        "mapping": "amount_eur",
+        "type": "DOUBLE"
+      },
+      {
+        "name": "streaming_amount_eur",
+        "mapping": "amount_eur",
+        "type": "DOUBLE"
+      },
+      {
+        "name": "_bronze_ingested_at",
+        "mapping": "_bronze_ingested_at",
+        "type": "TIMESTAMP",
+        "dataFormat": "custom-date-time",
+        "formatHint": "yyyy-MM-dd'T'HH:mm:ss.SSS"
+      },
+      {
+        "name": "_silver_processed_at",
+        "mapping": "_silver_processed_at",
+        "type": "TIMESTAMP",
+        "dataFormat": "custom-date-time",
+        "formatHint": "yyyy-MM-dd'T'HH:mm:ss.SSS"
+      },
+      {
+        "name": "sender_key",
+        "mapping": "sender_key",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "corridor",
+        "mapping": "corridor",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "is_cross_border",
+        "mapping": "is_cross_border",
+        "type": "BOOLEAN"
+      }
+    ]
+  }
+}

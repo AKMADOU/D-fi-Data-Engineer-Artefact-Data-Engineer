@@ -1,0 +1,91 @@
+{
+  "tableName": "silver-insurance-operations",
+  "schemaName": "default",
+  "topicName": "silver-insurance-operations",
+  "message": {
+    "dataFormat": "json",
+    "fields": [
+      {
+        "name": "operation_id",
+        "mapping": "operation_id",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "event_time",
+        "mapping": "timestamp",
+        "type": "TIMESTAMP",
+        "dataFormat": "custom-date-time",
+        "formatHint": "yyyy-MM-dd'T'HH:mm:ss.SSS"
+      },
+      {
+        "name": "country_code",
+        "mapping": "country_code",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "operation_type",
+        "mapping": "operation_type",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "product_line",
+        "mapping": "product_line",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "line_family",
+        "mapping": "line_family",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "amount",
+        "mapping": "amount",
+        "type": "DOUBLE"
+      },
+      {
+        "name": "currency",
+        "mapping": "currency",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "amount_eur",
+        "mapping": "amount_eur",
+        "type": "DOUBLE"
+      },
+      {
+        "name": "streaming_amount_eur",
+        "mapping": "amount_eur",
+        "type": "DOUBLE"
+      },
+      {
+        "name": "_bronze_ingested_at",
+        "mapping": "_bronze_ingested_at",
+        "type": "TIMESTAMP",
+        "dataFormat": "custom-date-time",
+        "formatHint": "yyyy-MM-dd'T'HH:mm:ss.SSS"
+      },
+      {
+        "name": "_silver_processed_at",
+        "mapping": "_silver_processed_at",
+        "type": "TIMESTAMP",
+        "dataFormat": "custom-date-time",
+        "formatHint": "yyyy-MM-dd'T'HH:mm:ss.SSS"
+      },
+      {
+        "name": "claim_status",
+        "mapping": "claim_status",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "account_key",
+        "mapping": "account_key",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "customer_key",
+        "mapping": "customer_key",
+        "type": "VARCHAR"
+      }
+    ]
+  }
+}

@@ -1,0 +1,33 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: superset
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [superset.waba.local]
+      secretName: waba-tls
+  rules:
+    - host: superset.waba.local
+      http:
+        paths:
+          - {path: /, pathType: Prefix, backend: {service: {name: superset, port: {number: 8088}}}}
+---
+# Trino : l'Ingress rechiffre vers le port HTTPS de Trino (OAuth2 exige TLS de bout en bout)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: trino
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: HTTPS
+    nginx.ingress.kubernetes.io/proxy-ssl-verify: "off"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [trino.waba.local]
+      secretName: waba-tls
+  rules:
+    - host: trino.waba.local
+      http:
+        paths:
+          - {path: /, pathType: Prefix, backend: {service: {name: trino, port: {number: 8443}}}}

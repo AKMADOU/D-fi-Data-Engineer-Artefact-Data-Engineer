@@ -1,0 +1,19 @@
+# Mêmes expressions que les alertes Grafana (grafana/provisioning/alerting.yaml),
+# testées avec : promtool test rules k8s/monitoring/tests/alert-tests.yml
+groups:
+- name: waba-alertes-grafana (équivalent Prometheus, pour tests)
+  rules:
+  - alert: SparkFraudDown
+    expr: (clamp_max((((max(up{app="stream-gold"}) or vector(0)) < bool 1) + ((time()
+      - (max(waba_stream_last_progress_timestamp_seconds{stream_job="silver_to_gold"})
+      or vector(0))) > bool 120)), 1)) > 0
+    for: 5m
+  - alert: AmlConsumerLag
+    expr: (sum(waba_stream_kafka_lag_messages{stream_job="silver_to_gold",query="event_rules"})
+      or vector(0)) > 5000
+    for: 1m
+  - alert: RegulatoryReportFailed
+    expr: (clamp_max((hour() >= bool 6) * ((max(waba_dag_last_success_timestamp_seconds{dag_id="dag_regulatory_report"})
+      or vector(0)) < bool (time() - time() % 86400)) + ((max(waba_dag_last_failure_timestamp_seconds{dag_id="dag_regulatory_report"})
+      or vector(0)) > bool (max(waba_dag_last_success_timestamp_seconds{dag_id="dag_regulatory_report"})
+      or vector(0))), 1)) > 0

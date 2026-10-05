@@ -1,0 +1,85 @@
+# MinIO (build communautaire pgsty/silo) : raw-landing, lakehouse, archive, regulatory-reports.
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  labels: {app: minio}
+spec:
+  selector: {app: minio}
+  ports:
+    - {name: s3, port: 9000, targetPort: 9000}
+    - {name: console, port: 9001, targetPort: 9001}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: minio
+  labels: {app: minio}
+spec:
+  serviceName: minio
+  replicas: 1
+  selector:
+    matchLabels: {app: minio}
+  template:
+    metadata:
+      labels: {app: minio}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9000"
+        prometheus.io/path: /minio/v2/metrics/cluster
+    spec:
+      securityContext: {fsGroup: 1000}
+      containers:
+        - name: minio
+          image: pgsty/silo:RELEASE.2026-08-06T00-00-00Z
+          args: ["server", "/data", "--console-address", ":9001"]
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom: {secretKeyRef: {name: ingestion-env, key: MINIO_ROOT_USER}}
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom: {secretKeyRef: {name: ingestion-env, key: MINIO_ROOT_PASSWORD}}
+            - {name: MINIO_PROMETHEUS_AUTH_TYPE, value: public}
+            - {name: MINIO_BROWSER_REDIRECT_URL, value: "https://minio.waba.local"}
+          ports:
+            - {containerPort: 9000, name: s3}
+            - {containerPort: 9001, name: console}
+          readinessProbe:
+            httpGet: {path: /minio/health/ready, port: 9000}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /minio/health/live, port: 9000}
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {memory: 1Gi}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: {requests: {storage: 20Gi}}
+---
+# Buckets, versioning et compte de service à privilèges restreints (idempotent)
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-init
+spec:
+  backoffLimit: 20
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: minio-init
+          image: waba/minio-init:1.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - {name: MINIO_URL, value: "http://minio.ingestion.svc.cluster.local:9000"}
+          envFrom:
+            - secretRef: {name: ingestion-env}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {memory: 256Mi}

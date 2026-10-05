@@ -1,0 +1,69 @@
+{
+  "tableName": "raw-bank-transactions",
+  "schemaName": "default",
+  "topicName": "raw-bank-transactions",
+  "message": {
+    "dataFormat": "json",
+    "fields": [
+      {
+        "name": "transaction_id",
+        "mapping": "transaction_id",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "timestamp",
+        "mapping": "timestamp",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "account_id",
+        "mapping": "account_id",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "country_code",
+        "mapping": "country_code",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "transaction_type",
+        "mapping": "transaction_type",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "amount",
+        "mapping": "amount",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "currency",
+        "mapping": "currency",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "transaction_status",
+        "mapping": "transaction_status",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "ingestion_timestamp",
+        "mapping": "ingestion_timestamp",
+        "type": "TIMESTAMP",
+        "dataFormat": "custom-date-time",
+        "formatHint": "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
+      },
+      {
+        "name": "source_file",
+        "mapping": "source_file",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "landed_at",
+        "mapping": "landed_at",
+        "type": "TIMESTAMP",
+        "dataFormat": "custom-date-time",
+        "formatHint": "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
+      }
+    ]
+  }
+}

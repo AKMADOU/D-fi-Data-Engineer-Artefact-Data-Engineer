@@ -1,0 +1,41 @@
+# TLS terminé par ingress-nginx (certificat auto-signé *.waba.local, Secret waba-tls).
+# Kafka UI n'a pas d'authentification : pas d'Ingress (kubectl port-forward uniquement).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ingestion
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: 512m
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [minio.waba.local, streamlit.waba.local]
+      secretName: waba-tls
+  rules:
+    - host: minio.waba.local
+      http:
+        paths:
+          - {path: /, pathType: Prefix, backend: {service: {name: minio, port: {number: 9001}}}}
+    - host: streamlit.waba.local
+      http:
+        paths:
+          - {path: /, pathType: Prefix, backend: {service: {name: generator, port: {number: 8501}}}}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nifi
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: HTTPS
+    nginx.ingress.kubernetes.io/proxy-ssl-verify: "off"
+    nginx.ingress.kubernetes.io/upstream-vhost: nifi.waba.local
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [nifi.waba.local]
+      secretName: waba-tls
+  rules:
+    - host: nifi.waba.local
+      http:
+        paths:
+          - {path: /, pathType: Prefix, backend: {service: {name: nifi, port: {number: 8443}}}}

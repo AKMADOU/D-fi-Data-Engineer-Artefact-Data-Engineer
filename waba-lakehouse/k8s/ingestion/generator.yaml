@@ -1,0 +1,64 @@
+# Générateur Streamlit (Level 1 + scénarios de fraude du Level 3)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: generator-state
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: {requests: {storage: 2Gi}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: generator
+  labels: {app: generator}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: generator}
+  template:
+    metadata:
+      labels: {app: generator}
+    spec:
+      securityContext: {fsGroup: 1000}
+      containers:
+        - name: generator
+          image: waba/generator:1.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - {name: S3_ENDPOINT, value: "http://minio.ingestion.svc.cluster.local:9000"}
+            - {name: LANDING_BUCKET, value: raw-landing}
+            - {name: ARCHIVE_BUCKET, value: archive}
+            - {name: GENERATOR_STATE_DIR, value: /data/state}
+            - {name: AWS_REGION, value: us-east-1}
+            - name: S3_ACCESS_KEY
+              valueFrom: {secretKeyRef: {name: ingestion-env, key: S3_ACCESS_KEY}}
+            - name: S3_SECRET_KEY
+              valueFrom: {secretKeyRef: {name: ingestion-env, key: S3_SECRET_KEY}}
+          ports:
+            - {containerPort: 8501, name: http}
+          readinessProbe:
+            httpGet: {path: /_stcore/health, port: 8501}
+            periodSeconds: 15
+          livenessProbe:
+            httpGet: {path: /_stcore/health, port: 8501}
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests: {cpu: 100m, memory: 512Mi}
+            limits: {memory: 3Gi}
+          volumeMounts:
+            - {name: state, mountPath: /data/state}
+      volumes:
+        - name: state
+          persistentVolumeClaim: {claimName: generator-state}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: generator
+spec:
+  selector: {app: generator}
+  ports:
+    - {name: http, port: 8501, targetPort: 8501}

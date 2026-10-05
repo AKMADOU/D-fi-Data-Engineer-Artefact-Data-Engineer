@@ -1,0 +1,64 @@
+{
+  "tableName": "silver-loan-repayments",
+  "schemaName": "default",
+  "topicName": "silver-loan-repayments",
+  "message": {
+    "dataFormat": "json",
+    "fields": [
+      {
+        "name": "repayment_id",
+        "mapping": "repayment_id",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "event_time",
+        "mapping": "timestamp",
+        "type": "TIMESTAMP",
+        "dataFormat": "custom-date-time",
+        "formatHint": "yyyy-MM-dd'T'HH:mm:ss.SSS"
+      },
+      {
+        "name": "country_code",
+        "mapping": "country_code",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "loan_type",
+        "mapping": "loan_type",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "repayment_status",
+        "mapping": "repayment_status",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "days_overdue",
+        "mapping": "days_overdue",
+        "type": "BIGINT"
+      },
+      {
+        "name": "amount_due_eur",
+        "mapping": "amount_due_eur",
+        "type": "DOUBLE"
+      },
+      {
+        "name": "amount_paid_eur",
+        "mapping": "amount_paid_eur",
+        "type": "DOUBLE"
+      },
+      {
+        "name": "is_non_performing",
+        "mapping": "is_non_performing",
+        "type": "BOOLEAN"
+      },
+      {
+        "name": "_silver_processed_at",
+        "mapping": "_silver_processed_at",
+        "type": "TIMESTAMP",
+        "dataFormat": "custom-date-time",
+        "formatHint": "yyyy-MM-dd'T'HH:mm:ss.SSS"
+      }
+    ]
+  }
+}

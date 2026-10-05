@@ -1,0 +1,6 @@
+# Déjà présents dans l'image officielle (pip ne retélécharge rien si la version convient)
+apache-airflow-providers-docker
+apache-airflow-providers-amazon
+# Level 4 : client Kubernetes (soumission des SparkApplication au Spark Operator)
+apache-airflow-providers-cncf-kubernetes
+pytest==8.3.3

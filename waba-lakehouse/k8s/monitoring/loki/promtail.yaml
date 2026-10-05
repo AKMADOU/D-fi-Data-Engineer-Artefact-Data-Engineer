@@ -1,0 +1,53 @@
+# Promtail (DaemonSet) : logs de tous les pods -> Loki. Les pods annotés
+# waba/log-format=json (drivers Spark batch et streaming) voient leurs lignes JSON
+# analysées : niveau, logger et champs métier (job, statut, couche, durée, lag).
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+positions:
+  filename: /run/promtail/positions.yaml
+clients:
+  - url: http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push
+scrape_configs:
+  - job_name: kubernetes-pods
+    kubernetes_sd_configs:
+      - role: pod
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_node_name]
+        target_label: __host__
+      - source_labels: [__meta_kubernetes_namespace]
+        target_label: namespace
+      - source_labels: [__meta_kubernetes_pod_name]
+        target_label: pod
+      - source_labels: [__meta_kubernetes_pod_container_name]
+        target_label: container
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        target_label: app
+      - source_labels: [__meta_kubernetes_pod_label_spark_role]
+        target_label: spark_role
+      - source_labels: [__meta_kubernetes_pod_annotation_waba_log_format]
+        target_label: log_format
+      - source_labels: [__meta_kubernetes_pod_uid, __meta_kubernetes_pod_container_name]
+        separator: /
+        target_label: __path__
+        replacement: /var/log/pods/*$1/*.log
+    pipeline_stages:
+      - cri: {}            # runtime containerd (minikube --container-runtime=containerd)
+      - match:
+          selector: '{log_format="json"}'
+          stages:
+            - json:
+                expressions:
+                  level: level
+                  logger: logger
+                  msg: msg
+            - json:
+                source: msg
+                expressions:
+                  status: status
+                  layer: layer
+                  stream_job: job
+            - labels:
+                level:
+                logger:
+                status:

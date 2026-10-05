@@ -1,0 +1,111 @@
+# Apache NiFi 2 (single-user, HTTPS) + provisioning du flux raw-landing -> Kafka.
+apiVersion: v1
+kind: Service
+metadata:
+  name: nifi
+  labels: {app: nifi}
+spec:
+  selector: {app: nifi}
+  ports:
+    - {name: https, port: 8443, targetPort: 8443}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nifi
+  labels: {app: nifi}
+spec:
+  serviceName: nifi
+  replicas: 1
+  selector:
+    matchLabels: {app: nifi}
+  template:
+    metadata:
+      labels: {app: nifi}
+    spec:
+      securityContext: {fsGroup: 1000}
+      containers:
+        - name: nifi
+          image: apache/nifi:2.12.0
+          env:
+            - {name: NIFI_WEB_HTTPS_PORT, value: "8443"}
+            - {name: NIFI_WEB_HTTPS_HOST, value: "0.0.0.0"}
+            - name: NIFI_WEB_PROXY_HOST
+              value: "nifi.waba.local,nifi.waba.local:443,nifi.ingestion.svc.cluster.local:8443"
+            - name: SINGLE_USER_CREDENTIALS_USERNAME
+              valueFrom: {secretKeyRef: {name: ingestion-env, key: NIFI_USERNAME}}
+            - name: SINGLE_USER_CREDENTIALS_PASSWORD
+              valueFrom: {secretKeyRef: {name: ingestion-env, key: NIFI_PASSWORD}}
+            - name: NIFI_SENSITIVE_PROPS_KEY
+              valueFrom: {secretKeyRef: {name: ingestion-env, key: NIFI_SENSITIVE_PROPS_KEY}}
+            - {name: NIFI_JVM_HEAP_INIT, value: 1g}
+            - {name: NIFI_JVM_HEAP_MAX, value: 2g}
+          ports:
+            - {containerPort: 8443, name: https}
+          startupProbe:
+            tcpSocket: {port: 8443}
+            periodSeconds: 10
+            failureThreshold: 60          # jusqu'à 10 min au premier démarrage
+          readinessProbe:
+            tcpSocket: {port: 8443}
+            periodSeconds: 15
+          livenessProbe:
+            tcpSocket: {port: 8443}
+            periodSeconds: 30
+            failureThreshold: 5
+          resources:
+            requests: {cpu: 250m, memory: 2Gi}
+            limits: {memory: 3Gi}
+          volumeMounts:
+            - {name: data, mountPath: /opt/nifi/nifi-current/conf, subPath: conf}
+            - {name: data, mountPath: /opt/nifi/nifi-current/state, subPath: state}
+            - {name: data, mountPath: /opt/nifi/nifi-current/database_repository, subPath: database}
+            - {name: data, mountPath: /opt/nifi/nifi-current/flowfile_repository, subPath: flowfile}
+            - {name: data, mountPath: /opt/nifi/nifi-current/content_repository, subPath: content}
+            - {name: data, mountPath: /opt/nifi/nifi-current/provenance_repository, subPath: provenance}
+      initContainers:
+        # Premier démarrage : recopie la configuration par défaut de l'image dans le volume
+        - name: seed-conf
+          image: apache/nifi:2.12.0
+          command: ["sh", "-c", "[ -f /data/conf/nifi.properties ] || (mkdir -p /data/conf && cp -a /opt/nifi/nifi-current/conf/. /data/conf/)"]
+          volumeMounts:
+            - {name: data, mountPath: /data}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {memory: 256Mi}
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: {requests: {storage: 10Gi}}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: nifi-init
+spec:
+  backoffLimit: 10
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: provision
+          image: python:3.12-alpine
+          command: ["python", "/provision/provision.py"]
+          env:
+            - {name: NIFI_URL, value: "https://nifi.ingestion.svc.cluster.local:8443"}
+            - {name: S3_ENDPOINT, value: "http://minio.ingestion.svc.cluster.local:9000"}
+            - {name: KAFKA_BOOTSTRAP_SERVERS, value: "kafka.ingestion.svc.cluster.local:9092"}
+            - {name: LANDING_BUCKET, value: raw-landing}
+            - {name: NIFI_REPLAY_HISTORY, value: "false"}
+          envFrom:
+            - secretRef: {name: ingestion-env}     # NIFI_USERNAME/PASSWORD, S3_ACCESS_KEY/SECRET_KEY
+          resources:
+            requests: {cpu: 20m, memory: 64Mi}
+            limits: {memory: 128Mi}
+          volumeMounts:
+            - {name: provision, mountPath: /provision}
+      volumes:
+        - name: provision
+          configMap: {name: nifi-provision}

@@ -1,0 +1,273 @@
+# Airflow 3.3 : base PostgreSQL (PVC), init, api-server, scheduler (LocalExecutor), dag-processor.
+# Les jobs Spark sont soumis au Spark Operator (WABA_SPARK_BACKEND=k8s).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: airflow-config
+data:
+  AIRFLOW__CORE__EXECUTOR: LocalExecutor
+  AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+  AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+  AIRFLOW__CORE__DEFAULT_TIMEZONE: utc
+  AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver.processing.svc.cluster.local:8080/execution/
+  # Les logs de tâche sont servis par le scheduler : il s'annonce par son IP de pod
+  AIRFLOW__CORE__HOSTNAME_CALLABLE: airflow.utils.net.get_host_ip_address
+  AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: admin:admin
+  AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/auth/passwords.json
+  AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
+  AIRFLOW__API__BASE_URL: https://airflow.waba.local
+  # Métriques StatsD -> statsd-exporter -> Prometheus (taux d'erreur des DAGs)
+  AIRFLOW__METRICS__STATSD_ON: "True"
+  AIRFLOW__METRICS__STATSD_HOST: statsd-exporter.monitoring.svc.cluster.local
+  AIRFLOW__METRICS__STATSD_PORT: "9125"
+  AIRFLOW__METRICS__STATSD_PREFIX: airflow
+  AIRFLOW_VAR_WABA_COUNTRIES: '["CI", "SN", "ML", "BF", "GN", "TG", "BJ", "GH"]'
+  AIRFLOW_VAR_ICEBERG_REST_URI: http://iceberg-rest.processing.svc.cluster.local:8181
+  WABA_SPARK_BACKEND: k8s
+  WABA_SPARK_NAMESPACE: processing
+  WABA_SPARK_SERVICE_ACCOUNT: spark
+  WABA_SPARK_ENV_SECRET: waba-spark-env
+  WABA_SPARK_IMAGE: waba/spark:3.5.3-iceberg1.6.1
+  WABA_PUSHGATEWAY_URL: http://pushgateway.monitoring.svc.cluster.local:9091
+  WABA_INGEST_SCHEDULE: "*/15 * * * *"
+  SPARK_POOL_SLOTS: "1"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: airflow
+---
+# Airflow crée et suit des SparkApplication, et lit les logs des pods driver
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: airflow-spark-submitter
+rules:
+  - apiGroups: [sparkoperator.k8s.io]
+    resources: [sparkapplications]
+    verbs: [create, get, list, watch, delete]
+  - apiGroups: [""]
+    resources: [pods, pods/log]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: airflow-spark-submitter
+subjects:
+  - kind: ServiceAccount
+    name: airflow
+    namespace: processing
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: airflow-spark-submitter
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: airflow-db
+spec:
+  selector: {app: airflow-db}
+  ports:
+    - {name: postgres, port: 5432, targetPort: 5432}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: airflow-db
+  labels: {app: airflow-db}
+spec:
+  serviceName: airflow-db
+  replicas: 1
+  selector:
+    matchLabels: {app: airflow-db}
+  template:
+    metadata:
+      labels: {app: airflow-db}
+    spec:
+      securityContext: {fsGroup: 70}
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          env:
+            - {name: POSTGRES_USER, value: airflow}
+            - {name: POSTGRES_DB, value: airflow}
+            - {name: PGDATA, value: /var/lib/postgresql/data/pgdata}
+            - name: POSTGRES_PASSWORD
+              valueFrom: {secretKeyRef: {name: airflow-env, key: POSTGRES_PASSWORD}}
+          ports:
+            - {containerPort: 5432, name: postgres}
+          readinessProbe:
+            exec: {command: ["pg_isready", "-U", "airflow"]}
+            periodSeconds: 10
+          livenessProbe:
+            exec: {command: ["pg_isready", "-U", "airflow"]}
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {memory: 512Mi}
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/postgresql/data}
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: {requests: {storage: 5Gi}}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: airflow-init
+spec:
+  backoffLimit: 20
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: airflow
+      containers:
+        - name: init
+          image: waba/airflow:3.3.2
+          imagePullPolicy: IfNotPresent
+          command: ["bash", "/opt/airflow/init.sh"]
+          envFrom:
+            - configMapRef: {name: airflow-config}
+            - secretRef: {name: airflow-env}
+          env:
+            # le fichier de mots de passe réel est monté depuis un Secret (lecture seule)
+            - {name: AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE, value: /tmp/passwords.json}
+          resources:
+            requests: {cpu: 100m, memory: 512Mi}
+            limits: {memory: 1Gi}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airflow-apiserver
+  labels: {app: airflow-apiserver}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: airflow-apiserver}
+  template:
+    metadata:
+      labels: {app: airflow-apiserver, airflow-component: apiserver}
+    spec:
+      serviceAccountName: airflow
+      containers:
+        - name: apiserver
+          image: waba/airflow:3.3.2
+          imagePullPolicy: IfNotPresent
+          args: ["api-server"]
+          envFrom:
+            - configMapRef: {name: airflow-config}
+            - secretRef: {name: airflow-env}
+          ports:
+            - {containerPort: 8080, name: http}
+          readinessProbe:
+            httpGet: {path: /api/v2/version, port: 8080}
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          livenessProbe:
+            httpGet: {path: /api/v2/version, port: 8080}
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+          resources:
+            requests: {cpu: 200m, memory: 768Mi}
+            limits: {memory: 1536Mi}
+          volumeMounts:
+            - {name: auth, mountPath: /opt/airflow/auth}
+      # Le simple auth manager ouvre ce fichier en écriture (verrou) : copie du Secret
+      # dans un emptyDir inscriptible au démarrage du pod.
+      initContainers:
+        - name: passwords
+          image: waba/airflow:3.3.2
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c", "cp /secret/passwords.json /opt/airflow/auth/passwords.json && chmod 600 /opt/airflow/auth/passwords.json"]
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 64Mi}
+          volumeMounts:
+            - {name: auth, mountPath: /opt/airflow/auth}
+            - {name: passwords-secret, mountPath: /secret, readOnly: true}
+      volumes:
+        - name: auth
+          emptyDir: {}
+        - name: passwords-secret
+          secret: {secretName: airflow-passwords}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: airflow-apiserver
+spec:
+  selector: {app: airflow-apiserver}
+  ports:
+    - {name: http, port: 8080, targetPort: 8080}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airflow-scheduler
+  labels: {app: airflow-scheduler}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: airflow-scheduler}
+  template:
+    metadata:
+      labels: {app: airflow-scheduler, airflow-component: scheduler}
+    spec:
+      serviceAccountName: airflow
+      containers:
+        - name: scheduler
+          image: waba/airflow:3.3.2
+          imagePullPolicy: IfNotPresent
+          args: ["scheduler"]
+          envFrom:
+            - configMapRef: {name: airflow-config}
+            - secretRef: {name: airflow-env}
+          ports:
+            - {containerPort: 8974, name: health}
+            - {containerPort: 8793, name: logs}
+          readinessProbe:
+            httpGet: {path: /health, port: 8974}
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          livenessProbe:
+            httpGet: {path: /health, port: 8974}
+            initialDelaySeconds: 90
+            periodSeconds: 30
+            timeoutSeconds: 10
+          resources:
+            requests: {cpu: 250m, memory: 1Gi}
+            limits: {memory: 2Gi}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airflow-dag-processor
+  labels: {app: airflow-dag-processor}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: airflow-dag-processor}
+  template:
+    metadata:
+      labels: {app: airflow-dag-processor, airflow-component: dag-processor}
+    spec:
+      serviceAccountName: airflow
+      containers:
+        - name: dag-processor
+          image: waba/airflow:3.3.2
+          imagePullPolicy: IfNotPresent
+          args: ["dag-processor"]
+          envFrom:
+            - configMapRef: {name: airflow-config}
+            - secretRef: {name: airflow-env}
+          resources:
+            requests: {cpu: 100m, memory: 512Mi}
+            limits: {memory: 1Gi}

@@ -1,0 +1,10 @@
+apiVersion: 1
+providers:
+  - name: waba
+    orgId: 1
+    folder: WABA
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    options:
+      path: /var/lib/grafana/dashboards

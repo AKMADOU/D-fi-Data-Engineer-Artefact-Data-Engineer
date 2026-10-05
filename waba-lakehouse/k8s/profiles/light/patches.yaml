@@ -1,0 +1,393 @@
+# Profil léger (machine 16 Go) : tas JVM, requêtes et limites mémoire réduits.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  namespace: ingestion
+spec:
+  template:
+    spec:
+      containers:
+      - name: kafka
+        resources:
+          requests:
+            memory: 512Mi
+            cpu: 100m
+          limits:
+            memory: 1Gi
+        env:
+        - name: KAFKA_HEAP_OPTS
+          value: -Xms256m -Xmx512m
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nifi
+  namespace: ingestion
+spec:
+  template:
+    spec:
+      containers:
+      - name: nifi
+        resources:
+          requests:
+            memory: 1Gi
+            cpu: 100m
+          limits:
+            memory: 1536Mi
+        env:
+        - name: NIFI_JVM_HEAP_INIT
+          value: 512m
+        - name: NIFI_JVM_HEAP_MAX
+          value: 1g
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: minio
+  namespace: ingestion
+spec:
+  template:
+    spec:
+      containers:
+      - name: minio
+        resources:
+          requests:
+            memory: 128Mi
+          limits:
+            memory: 512Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: generator
+  namespace: ingestion
+spec:
+  template:
+    spec:
+      containers:
+      - name: generator
+        resources:
+          requests:
+            memory: 256Mi
+          limits:
+            memory: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-ui
+  namespace: ingestion
+spec:
+  template:
+    spec:
+      containers:
+      - name: kafka-ui
+        resources:
+          requests:
+            memory: 128Mi
+          limits:
+            memory: 512Mi
+  replicas: 0
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: iceberg-rest
+  namespace: processing
+spec:
+  template:
+    spec:
+      containers:
+      - name: iceberg-rest
+        resources:
+          requests:
+            memory: 192Mi
+          limits:
+            memory: 512Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airflow-apiserver
+  namespace: processing
+spec:
+  template:
+    spec:
+      containers:
+      - name: apiserver
+        resources:
+          requests:
+            memory: 512Mi
+            cpu: 100m
+          limits:
+            memory: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airflow-scheduler
+  namespace: processing
+spec:
+  template:
+    spec:
+      containers:
+      - name: scheduler
+        resources:
+          requests:
+            memory: 768Mi
+            cpu: 100m
+          limits:
+            memory: 1536Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airflow-dag-processor
+  namespace: processing
+spec:
+  template:
+    spec:
+      containers:
+      - name: dag-processor
+        resources:
+          requests:
+            memory: 384Mi
+            cpu: 50m
+          limits:
+            memory: 768Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stream-silver
+  namespace: processing
+spec:
+  template:
+    spec:
+      containers:
+      - name: driver
+        resources:
+          requests:
+            memory: 1Gi
+            cpu: 250m
+          limits:
+            memory: 1536Mi
+        command:
+        - /opt/spark/bin/spark-submit
+        - --master
+        - local[2]
+        - --driver-memory
+        - 900m
+        - --conf
+        - spark.sql.shuffle.partitions=4
+        - /opt/waba/jobs/stream_raw_to_silver.py
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stream-gold
+  namespace: processing
+spec:
+  template:
+    spec:
+      containers:
+      - name: driver
+        resources:
+          requests:
+            memory: 1Gi
+            cpu: 250m
+          limits:
+            memory: 1536Mi
+        command:
+        - /opt/spark/bin/spark-submit
+        - --master
+        - local[2]
+        - --driver-memory
+        - 900m
+        - --conf
+        - spark.sql.shuffle.partitions=4
+        - /opt/waba/jobs/stream_silver_to_gold.py
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trino
+  namespace: serving
+spec:
+  template:
+    spec:
+      containers:
+      - name: trino
+        resources:
+          requests:
+            memory: 1536Mi
+            cpu: 250m
+          limits:
+            memory: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: superset
+  namespace: serving
+spec:
+  template:
+    spec:
+      containers:
+      - name: superset
+        resources:
+          requests:
+            memory: 512Mi
+            cpu: 100m
+          limits:
+            memory: 1536Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+  namespace: governance
+spec:
+  template:
+    spec:
+      containers:
+      - name: keycloak
+        resources:
+          requests:
+            memory: 512Mi
+            cpu: 100m
+          limits:
+            memory: 1Gi
+        env:
+        - name: JAVA_OPTS_KC_HEAP
+          value: -Xms128m -Xmx512m
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: elasticsearch
+  namespace: governance
+spec:
+  template:
+    spec:
+      containers:
+      - name: elasticsearch
+        resources:
+          requests:
+            memory: 768Mi
+            cpu: 100m
+          limits:
+            memory: 1Gi
+        env:
+        - name: ES_JAVA_OPTS
+          value: -Xms512m -Xmx512m
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openmetadata
+  namespace: governance
+spec:
+  template:
+    spec:
+      containers:
+      - name: openmetadata
+        resources:
+          requests:
+            memory: 1Gi
+            cpu: 100m
+          limits:
+            memory: 1280Mi
+      initContainers:
+      - name: migrate
+        resources:
+          requests:
+            memory: 512Mi
+          limits:
+            memory: 1280Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: monitoring
+spec:
+  template:
+    spec:
+      containers:
+      - name: prometheus
+        resources:
+          requests:
+            memory: 256Mi
+          limits:
+            memory: 1Gi
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: loki
+  namespace: monitoring
+spec:
+  template:
+    spec:
+      containers:
+      - name: loki
+        resources:
+          requests:
+            memory: 128Mi
+          limits:
+            memory: 512Mi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trino-config
+  namespace: serving
+data:
+  jvm.config: '-server
+
+    -Xmx1500M
+
+    -XX:InitialRAMPercentage=50
+
+    -XX:+ExplicitGCInvokesConcurrent
+
+    -XX:+ExitOnOutOfMemoryError
+
+    -XX:+HeapDumpOnOutOfMemoryError
+
+    -XX:-OmitStackTraceInFastThrow
+
+    -XX:ReservedCodeCacheSize=256M
+
+    -XX:PerMethodRecompilationCutoff=10000
+
+    -XX:PerBytecodeRecompilationCutoff=10000
+
+    -Djdk.attach.allowAttachSelf=true
+
+    -Djdk.nio.maxCachedBufferSize=2000000
+
+    -Dfile.encoding=UTF-8
+
+    -XX:+EnableDynamicAgentLoading
+
+    '
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openmetadata-config
+  namespace: governance
+data:
+  OPENMETADATA_HEAP_OPTS: -Xmx768m -Xms768m
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: airflow-config
+  namespace: processing
+data:
+  WABA_SPARK_DRIVER_MEMORY: 768m
+  WABA_SPARK_EXECUTOR_MEMORY: 1g

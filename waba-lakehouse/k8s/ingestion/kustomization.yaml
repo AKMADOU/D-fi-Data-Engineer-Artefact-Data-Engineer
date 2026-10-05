@@ -1,0 +1,12 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: ingestion
+labels:
+  - pairs: {app.kubernetes.io/part-of: waba, waba/domain: ingestion}
+    includeSelectors: false
+resources:
+  - minio.yaml
+  - kafka.yaml
+  - nifi.yaml
+  - generator.yaml
+  - ingress.yaml

@@ -1,0 +1,263 @@
+{
+  "realm": "waba",
+  "displayName": "WABA Group",
+  "enabled": true,
+  "sslRequired": "external",
+  "loginWithEmailAllowed": true,
+  "registrationAllowed": false,
+  "bruteForceProtected": true,
+  "accessTokenLifespan": 900,
+  "ssoSessionIdleTimeout": 3600,
+  "passwordPolicy": "length(12)",
+  "roles": {
+    "realm": [
+      {
+        "name": "group_admin",
+        "description": "Accès à toutes les entités et tous les pays"
+      },
+      {
+        "name": "country_analyst",
+        "description": "Analyste restreint à son pays (rôle country_XX associé)"
+      },
+      {
+        "name": "compliance_officer",
+        "description": "Accès aux seules tables Gold réglementaires (BCEAO, CIMA, AML)"
+      },
+      {
+        "name": "viewer",
+        "description": "Lecture des agrégats, sans donnée sensible"
+      },
+      {
+        "name": "country_CI",
+        "description": "Périmètre pays CI"
+      },
+      {
+        "name": "country_SN",
+        "description": "Périmètre pays SN"
+      },
+      {
+        "name": "country_ML",
+        "description": "Périmètre pays ML"
+      },
+      {
+        "name": "country_BF",
+        "description": "Périmètre pays BF"
+      },
+      {
+        "name": "country_GN",
+        "description": "Périmètre pays GN"
+      },
+      {
+        "name": "country_TG",
+        "description": "Périmètre pays TG"
+      },
+      {
+        "name": "country_BJ",
+        "description": "Périmètre pays BJ"
+      },
+      {
+        "name": "country_GH",
+        "description": "Périmètre pays GH"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "superset",
+      "name": "Apache Superset",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${SUPERSET_OIDC_CLIENT_SECRET}",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "implicitFlowEnabled": false,
+      "redirectUris": [
+        "https://superset.waba.local/oauth-authorized/keycloak"
+      ],
+      "webOrigins": [
+        "https://superset.waba.local"
+      ],
+      "attributes": {
+        "post.logout.redirect.uris": "+",
+        "pkce.code.challenge.method": "S256"
+      },
+      "protocolMappers": [
+        {
+          "name": "groups (rôles du realm)",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "claim.name": "groups",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        },
+        {
+          "name": "audience superset",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "superset",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "trino",
+      "name": "Trino",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${TRINO_OIDC_CLIENT_SECRET}",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "implicitFlowEnabled": false,
+      "redirectUris": [
+        "https://trino.waba.local/oauth2/callback"
+      ],
+      "webOrigins": [
+        "https://trino.waba.local"
+      ],
+      "attributes": {
+        "post.logout.redirect.uris": "+"
+      },
+      "protocolMappers": [
+        {
+          "name": "groups (rôles du realm)",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "claim.name": "groups",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        },
+        {
+          "name": "audience trino",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "trino",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "admin.groupe",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Awa",
+      "lastName": "Koné",
+      "email": "admin.groupe@waba.local",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${WABA_DEMO_PASSWORD}",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "group_admin"
+      ]
+    },
+    {
+      "username": "analyste.ci",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Koffi",
+      "lastName": "Yao",
+      "email": "analyste.ci@waba.local",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${WABA_DEMO_PASSWORD}",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "country_analyst",
+        "country_CI"
+      ]
+    },
+    {
+      "username": "analyste.gh",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Kwame",
+      "lastName": "Mensah",
+      "email": "analyste.gh@waba.local",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${WABA_DEMO_PASSWORD}",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "country_analyst",
+        "country_GH"
+      ]
+    },
+    {
+      "username": "conformite",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Fatou",
+      "lastName": "Diop",
+      "email": "conformite@waba.local",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${WABA_DEMO_PASSWORD}",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "compliance_officer"
+      ]
+    },
+    {
+      "username": "lecteur",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Moussa",
+      "lastName": "Traoré",
+      "email": "lecteur@waba.local",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${WABA_DEMO_PASSWORD}",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "viewer"
+      ]
+    }
+  ]
+}

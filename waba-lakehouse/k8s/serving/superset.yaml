@@ -1,0 +1,145 @@
+# Apache Superset 6.1 (image waba/superset : pilote Trino + Authlib), SSO Keycloak.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: superset-settings
+data:
+  SUPERSET_CONFIG_PATH: /app/superset_config/superset_config.py
+  SUPERSET_DB_HOST: superset-db
+  SUPERSET_DB_USER: superset
+  SUPERSET_DB_NAME: superset
+  KEYCLOAK_PUBLIC_URL: https://keycloak.waba.local
+  KEYCLOAK_INTERNAL_URL: http://keycloak.governance.svc.cluster.local:8080
+  KEYCLOAK_REALM: waba
+  SUPERSET_OIDC_CLIENT_ID: superset
+  SUPERSET_ADMIN_USERNAME: admin
+  TRINO_HOST: trino.serving.svc.cluster.local
+  TRINO_PORT: "8443"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: superset-db
+spec:
+  selector: {app: superset-db}
+  ports:
+    - {name: postgres, port: 5432, targetPort: 5432}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: superset-db
+  labels: {app: superset-db}
+spec:
+  serviceName: superset-db
+  replicas: 1
+  selector:
+    matchLabels: {app: superset-db}
+  template:
+    metadata:
+      labels: {app: superset-db}
+    spec:
+      securityContext: {fsGroup: 70}
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          env:
+            - {name: POSTGRES_USER, value: superset}
+            - {name: POSTGRES_DB, value: superset}
+            - {name: PGDATA, value: /var/lib/postgresql/data/pgdata}
+            - name: POSTGRES_PASSWORD
+              valueFrom: {secretKeyRef: {name: superset-env, key: SUPERSET_DB_PASSWORD}}
+          readinessProbe:
+            exec: {command: ["pg_isready", "-U", "superset"]}
+            periodSeconds: 10
+          livenessProbe:
+            exec: {command: ["pg_isready", "-U", "superset"]}
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {memory: 512Mi}
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/postgresql/data}
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: {requests: {storage: 2Gi}}
+---
+# Migrations, compte local, rôles, import des 3 dashboards (idempotent, relançable)
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: superset-init
+spec:
+  backoffLimit: 20
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: init
+          image: waba/superset:6.1.0-waba1
+          imagePullPolicy: IfNotPresent
+          command: ["bash", "/app/bootstrap/init.sh"]
+          envFrom:
+            - configMapRef: {name: superset-settings}
+            - secretRef: {name: superset-env}
+          resources:
+            requests: {cpu: 100m, memory: 512Mi}
+            limits: {memory: 1536Mi}
+          volumeMounts:
+            - {name: config, mountPath: /app/superset_config}
+      volumes:
+        - name: config
+          configMap: {name: superset-config}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: superset
+  labels: {app: superset}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: superset}
+  template:
+    metadata:
+      labels: {app: superset}
+    spec:
+      containers:
+        - name: superset
+          image: waba/superset:6.1.0-waba1
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef: {name: superset-settings}
+            - secretRef: {name: superset-env}
+          ports:
+            - {containerPort: 8088, name: http}
+          readinessProbe:
+            httpGet: {path: /health, port: 8088}
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          livenessProbe:
+            httpGet: {path: /health, port: 8088}
+            initialDelaySeconds: 90
+            periodSeconds: 30
+            timeoutSeconds: 10
+          resources:
+            requests: {cpu: 200m, memory: 1Gi}
+            limits: {memory: 2Gi}
+          volumeMounts:
+            - {name: config, mountPath: /app/superset_config}
+      volumes:
+        - name: config
+          configMap: {name: superset-config}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: superset
+spec:
+  selector: {app: superset}
+  ports:
+    - {name: http, port: 8088, targetPort: 8088}

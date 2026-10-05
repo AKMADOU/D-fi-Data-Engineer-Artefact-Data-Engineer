@@ -1,0 +1,340 @@
+{
+  "catalogs": [
+    {
+      "group": "group_admin",
+      "allow": "all"
+    },
+    {
+      "user": "openmetadata",
+      "catalog": "iceberg|kafka|system",
+      "allow": "read-only"
+    },
+    {
+      "group": "group_admin|country_analyst|compliance_officer|viewer",
+      "catalog": "iceberg|system",
+      "allow": "read-only"
+    },
+    {
+      "group": "service",
+      "catalog": "system",
+      "allow": "read-only"
+    },
+    {
+      "allow": "none"
+    }
+  ],
+  "schemas": [
+    {
+      "group": "group_admin",
+      "owner": true
+    },
+    {
+      "user": "openmetadata",
+      "owner": false
+    },
+    {
+      "group": "country_analyst|viewer",
+      "schema": "silver|gold|information_schema",
+      "owner": false
+    },
+    {
+      "group": "compliance_officer",
+      "schema": "gold|information_schema",
+      "owner": false
+    },
+    {
+      "owner": false,
+      "schema": "information_schema"
+    }
+  ],
+  "tables": [
+    {
+      "group": "group_admin",
+      "privileges": [
+        "SELECT",
+        "INSERT",
+        "DELETE",
+        "UPDATE",
+        "OWNERSHIP",
+        "GRANT_SELECT"
+      ]
+    },
+    {
+      "user": "openmetadata",
+      "catalog": "iceberg|kafka",
+      "privileges": [
+        "SELECT"
+      ]
+    },
+    {
+      "group": "compliance_officer",
+      "catalog": "iceberg",
+      "schema": "gold",
+      "table": "regulatory_bceao_daily|regulatory_cima_daily|aml_events|fraud_alerts|liquidity_alerts|npl_ratio_by_country|loss_ratio_by_product|claims_processing_time",
+      "privileges": [
+        "SELECT"
+      ]
+    },
+    {
+      "group": "country_CI",
+      "catalog": "iceberg",
+      "schema": "silver",
+      "table": "fx_rates",
+      "privileges": [
+        "SELECT"
+      ]
+    },
+    {
+      "group": "country_CI",
+      "catalog": "iceberg",
+      "schema": "silver|gold",
+      "privileges": [
+        "SELECT"
+      ],
+      "filter": "country_code = 'CI'"
+    },
+    {
+      "group": "country_SN",
+      "catalog": "iceberg",
+      "schema": "silver",
+      "table": "fx_rates",
+      "privileges": [
+        "SELECT"
+      ]
+    },
+    {
+      "group": "country_SN",
+      "catalog": "iceberg",
+      "schema": "silver|gold",
+      "privileges": [
+        "SELECT"
+      ],
+      "filter": "country_code = 'SN'"
+    },
+    {
+      "group": "country_ML",
+      "catalog": "iceberg",
+      "schema": "silver",
+      "table": "fx_rates",
+      "privileges": [
+        "SELECT"
+      ]
+    },
+    {
+      "group": "country_ML",
+      "catalog": "iceberg",
+      "schema": "silver|gold",
+      "privileges": [
+        "SELECT"
+      ],
+      "filter": "country_code = 'ML'"
+    },
+    {
+      "group": "country_BF",
+      "catalog": "iceberg",
+      "schema": "silver",
+      "table": "fx_rates",
+      "privileges": [
+        "SELECT"
+      ]
+    },
+    {
+      "group": "country_BF",
+      "catalog": "iceberg",
+      "schema": "silver|gold",
+      "privileges": [
+        "SELECT"
+      ],
+      "filter": "country_code = 'BF'"
+    },
+    {
+      "group": "country_GN",
+      "catalog": "iceberg",
+      "schema": "silver",
+      "table": "fx_rates",
+      "privileges": [
+        "SELECT"
+      ]
+    },
+    {
+      "group": "country_GN",
+      "catalog": "iceberg",
+      "schema": "silver|gold",
+      "privileges": [
+        "SELECT"
+      ],
+      "filter": "country_code = 'GN'"
+    },
+    {
+      "group": "country_TG",
+      "catalog": "iceberg",
+      "schema": "silver",
+      "table": "fx_rates",
+      "privileges": [
+        "SELECT"
+      ]
+    },
+    {
+      "group": "country_TG",
+      "catalog": "iceberg",
+      "schema": "silver|gold",
+      "privileges": [
+        "SELECT"
+      ],
+      "filter": "country_code = 'TG'"
+    },
+    {
+      "group": "country_BJ",
+      "catalog": "iceberg",
+      "schema": "silver",
+      "table": "fx_rates",
+      "privileges": [
+        "SELECT"
+      ]
+    },
+    {
+      "group": "country_BJ",
+      "catalog": "iceberg",
+      "schema": "silver|gold",
+      "privileges": [
+        "SELECT"
+      ],
+      "filter": "country_code = 'BJ'"
+    },
+    {
+      "group": "country_GH",
+      "catalog": "iceberg",
+      "schema": "silver",
+      "table": "fx_rates",
+      "privileges": [
+        "SELECT"
+      ]
+    },
+    {
+      "group": "country_GH",
+      "catalog": "iceberg",
+      "schema": "silver|gold",
+      "privileges": [
+        "SELECT"
+      ],
+      "filter": "country_code = 'GH'"
+    },
+    {
+      "group": "viewer",
+      "catalog": "iceberg",
+      "schema": "gold",
+      "table": "daily_transaction_volume|npl_ratio_by_country|customer_arpu_monthly|loss_ratio_by_product|claims_processing_time|mobile_money_daily_flow|cross_border_transfers",
+      "privileges": [
+        "SELECT"
+      ]
+    },
+    {
+      "group": "viewer",
+      "catalog": "iceberg",
+      "schema": "silver",
+      "table": "insurance_operations",
+      "privileges": [
+        "SELECT"
+      ],
+      "columns": [
+        {
+          "name": "account_key",
+          "mask": "'***'"
+        },
+        {
+          "name": "customer_key",
+          "mask": "'***'"
+        },
+        {
+          "name": "beneficiary_account_key",
+          "mask": "'***'"
+        },
+        {
+          "name": "sender_key",
+          "mask": "'***'"
+        },
+        {
+          "name": "receiver_key",
+          "mask": "'***'"
+        },
+        {
+          "name": "amount",
+          "mask": "CASE WHEN is_claim THEN NULL ELSE amount END"
+        },
+        {
+          "name": "amount_eur",
+          "mask": "CASE WHEN is_claim THEN NULL ELSE amount_eur END"
+        }
+      ]
+    },
+    {
+      "group": "viewer",
+      "catalog": "iceberg",
+      "schema": "silver",
+      "table": "bank_transactions|mobile_money_payments|loan_repayments|accounts",
+      "privileges": [
+        "SELECT"
+      ],
+      "columns": [
+        {
+          "name": "account_key",
+          "mask": "'***'"
+        },
+        {
+          "name": "customer_key",
+          "mask": "'***'"
+        },
+        {
+          "name": "beneficiary_account_key",
+          "mask": "'***'"
+        },
+        {
+          "name": "sender_key",
+          "mask": "'***'"
+        },
+        {
+          "name": "receiver_key",
+          "mask": "'***'"
+        }
+      ]
+    },
+    {
+      "privileges": []
+    }
+  ],
+  "impersonation": [
+    {
+      "original_user": "superset",
+      "new_user": ".*",
+      "allow": true
+    },
+    {
+      "original_user": ".*",
+      "new_user": ".*",
+      "allow": false
+    }
+  ],
+  "queries": [
+    {
+      "group": "group_admin",
+      "allow": [
+        "execute",
+        "kill",
+        "view"
+      ]
+    },
+    {
+      "allow": [
+        "execute"
+      ]
+    }
+  ],
+  "system_information": [
+    {
+      "group": "group_admin|service",
+      "allow": [
+        "read"
+      ]
+    }
+  ]
+}

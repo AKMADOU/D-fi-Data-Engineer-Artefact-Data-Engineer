@@ -1,0 +1,159 @@
+# Pushgateway (état des DAGs poussé par Airflow), statsd-exporter (métriques Airflow),
+# kafka-exporter (offsets des topics = débit NiFi, consumer groups).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pushgateway
+  labels: {app: pushgateway}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: pushgateway}
+  template:
+    metadata:
+      labels: {app: pushgateway}
+    spec:
+      containers:
+        - name: pushgateway
+          image: prom/pushgateway:v1.11.3
+          args: ["--persistence.file=/data/metrics", "--persistence.interval=1m"]
+          ports:
+            - {containerPort: 9091, name: http}
+          readinessProbe:
+            httpGet: {path: /-/ready, port: 9091}
+          livenessProbe:
+            httpGet: {path: /-/healthy, port: 9091}
+            periodSeconds: 30
+          resources:
+            requests: {cpu: 20m, memory: 32Mi}
+            limits: {memory: 128Mi}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pushgateway
+spec:
+  selector: {app: pushgateway}
+  ports:
+    - {name: http, port: 9091, targetPort: 9091}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: statsd-exporter
+  labels: {app: statsd-exporter}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: statsd-exporter}
+  template:
+    metadata:
+      labels: {app: statsd-exporter}
+    spec:
+      containers:
+        - name: statsd-exporter
+          image: prom/statsd-exporter:v0.31.0
+          args: ["--statsd.mapping-config=/etc/statsd/statsd-mapping.yml",
+                 "--statsd.listen-udp=:9125", "--web.listen-address=:9102"]
+          ports:
+            - {containerPort: 9125, protocol: UDP, name: statsd}
+            - {containerPort: 9102, name: metrics}
+          readinessProbe:
+            httpGet: {path: /metrics, port: 9102}
+          resources:
+            requests: {cpu: 20m, memory: 32Mi}
+            limits: {memory: 128Mi}
+          volumeMounts:
+            - {name: mapping, mountPath: /etc/statsd}
+      volumes:
+        - name: mapping
+          configMap: {name: statsd-mapping}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: statsd-exporter
+spec:
+  selector: {app: statsd-exporter}
+  ports:
+    - {name: statsd, port: 9125, targetPort: 9125, protocol: UDP}
+    - {name: metrics, port: 9102, targetPort: 9102}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-exporter
+  labels: {app: kafka-exporter}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: kafka-exporter}
+  template:
+    metadata:
+      labels: {app: kafka-exporter}
+    spec:
+      containers:
+        - name: kafka-exporter
+          image: danielqsj/kafka-exporter:v1.9.0
+          args: ["--kafka.server=kafka.ingestion.svc.cluster.local:9092"]
+          ports:
+            - {containerPort: 9308, name: metrics}
+          readinessProbe:
+            tcpSocket: {port: 9308}
+            periodSeconds: 15
+          resources:
+            requests: {cpu: 20m, memory: 32Mi}
+            limits: {memory: 128Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-exporter
+spec:
+  selector: {app: kafka-exporter}
+  ports:
+    - {name: metrics, port: 9308, targetPort: 9308}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alert-webhook
+  labels: {app: alert-webhook}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: alert-webhook}
+  template:
+    metadata:
+      labels: {app: alert-webhook}
+    spec:
+      containers:
+        - name: receiver
+          image: python:3.12-alpine
+          command: ["python", "-u", "/app/receiver.py"]
+          ports:
+            - {containerPort: 8080, name: http}
+          readinessProbe:
+            httpGet: {path: /healthz, port: 8080}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 64Mi}
+          volumeMounts:
+            - {name: app, mountPath: /app}
+      volumes:
+        - name: app
+          configMap: {name: alert-webhook}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alert-webhook
+spec:
+  selector: {app: alert-webhook}
+  ports:
+    - {name: http, port: 8080, targetPort: 8080}

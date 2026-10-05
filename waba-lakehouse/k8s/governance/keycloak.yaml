@@ -1,0 +1,72 @@
+# Keycloak 26 (SSO OpenID Connect). Realm « waba » importé au premier démarrage
+# (ignoré s'il existe déjà) ; secrets des clients et mots de passe démo remplacés
+# depuis les variables d'environnement (placeholders ${...} du realm).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+  labels: {app: keycloak}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: keycloak}
+  template:
+    metadata:
+      labels: {app: keycloak}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9000"
+        prometheus.io/path: /metrics
+    spec:
+      containers:
+        - name: keycloak
+          image: keycloak/keycloak:26.7.5
+          args: ["start", "--import-realm"]
+          env:
+            - {name: KC_DB, value: postgres}
+            - {name: KC_DB_URL, value: "jdbc:postgresql://governance-db:5432/keycloak"}
+            - {name: KC_DB_USERNAME, value: keycloak}
+            # URL publique (émetteur des jetons) ; les services du cluster passent par
+            # http://keycloak.governance.svc.cluster.local:8080 (backchannel)
+            - {name: KC_HOSTNAME, value: "https://keycloak.waba.local"}
+            - {name: KC_HOSTNAME_BACKCHANNEL_DYNAMIC, value: "true"}
+            - {name: KC_HTTP_ENABLED, value: "true"}
+            - {name: KC_PROXY_HEADERS, value: xforwarded}
+            - {name: KC_HEALTH_ENABLED, value: "true"}
+            - {name: KC_METRICS_ENABLED, value: "true"}
+            - {name: KC_BOOTSTRAP_ADMIN_USERNAME, value: admin}
+            - {name: JAVA_OPTS_KC_HEAP, value: "-Xms256m -Xmx768m"}
+          envFrom:
+            - secretRef: {name: keycloak-env}   # KC_DB_PASSWORD, KC_BOOTSTRAP_ADMIN_PASSWORD, secrets clients, WABA_DEMO_PASSWORD
+          ports:
+            - {containerPort: 8080, name: http}
+            - {containerPort: 9000, name: management}
+          startupProbe:
+            httpGet: {path: /health/started, port: 9000}
+            periodSeconds: 10
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: {path: /health/ready, port: 9000}
+            periodSeconds: 15
+          livenessProbe:
+            httpGet: {path: /health/live, port: 9000}
+            periodSeconds: 30
+            failureThreshold: 4
+          resources:
+            requests: {cpu: 200m, memory: 768Mi}
+            limits: {memory: 1280Mi}
+          volumeMounts:
+            - {name: realm, mountPath: /opt/keycloak/data/import}
+      volumes:
+        - name: realm
+          configMap: {name: keycloak-realm}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak
+spec:
+  selector: {app: keycloak}
+  ports:
+    - {name: http, port: 8080, targetPort: 8080}
+    - {name: management, port: 9000, targetPort: 9000}

@@ -1,0 +1,389 @@
+# WABA Group — Level 1 + Level 2 + Level 3
+#   L1 : Streamlit -> MinIO -> Spark -> Iceberg (REST) -> Trino
+#   L2 : Airflow orchestre Bronze -> Silver -> Gold + reporting BCEAO / CIMA
+#   L3 : NiFi -> Kafka -> Spark Structured Streaming (fraude, AML, liquidité) -> Trino (Lambda)
+#        services du profil « streaming » (activé par COMPOSE_PROFILES=streaming dans .env)
+# Démarrage : cp .env.example .env && docker compose up -d --build
+name: waba
+
+x-s3-env: &s3-env
+  S3_ENDPOINT: http://minio:9000
+  S3_ACCESS_KEY: ${LAKEHOUSE_S3_ACCESS_KEY}
+  S3_SECRET_KEY: ${LAKEHOUSE_S3_SECRET_KEY}
+  AWS_REGION: ${AWS_REGION:-us-east-1}
+  LANDING_BUCKET: raw-landing
+  ARCHIVE_BUCKET: archive
+  REPORTS_BUCKET: regulatory-reports
+
+x-spark: &spark
+  build: ./spark
+  image: waba/spark:3.5.3-iceberg1.6.1
+  environment: &spark-env
+    <<: *s3-env
+    ICEBERG_REST_URI: http://iceberg-rest:8181
+    ICEBERG_WAREHOUSE: s3://lakehouse/
+    # Secret de pseudonymisation (hash SHA-256 salé des identifiants clients/comptes)
+    PII_HASH_SECRET: ${PII_HASH_SECRET:?PII_HASH_SECRET manquant dans .env (make env-upgrade)}
+    PYSPARK_PYTHON: python3
+    SPARK_WORKER_DIR: /tmp/spark-work
+  volumes:
+    - ./spark/jobs:/opt/waba/jobs:ro   # code monté : pas de rebuild pour itérer
+    - ./spark/tests:/opt/waba/tests:ro
+  networks: [waba]
+
+x-airflow: &airflow
+  build: ./airflow
+  image: waba/airflow:3.3.2
+  environment:
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:${AIRFLOW_DB_PASSWORD}@airflow-db/airflow
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:?AIRFLOW_FERNET_KEY manquant dans .env}
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+    AIRFLOW__CORE__DEFAULT_TIMEZONE: utc
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
+    # Secrets partagés par tous les composants (sinon jetons JWT refusés entre eux)
+    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET:?AIRFLOW_JWT_SECRET manquant dans .env}
+    AIRFLOW__API__SECRET_KEY: ${AIRFLOW_API_SECRET_KEY:?AIRFLOW_API_SECRET_KEY manquant dans .env}
+    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: admin:admin
+    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/auth/passwords.json
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
+    AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:?AIRFLOW_ADMIN_PASSWORD manquant dans .env}
+    # --- Connection & Variables Airflow (définies par l'environnement, aucun secret en dur)
+    AIRFLOW_CONN_MINIO_S3: '{"conn_type": "aws", "login": "${LAKEHOUSE_S3_ACCESS_KEY}", "password": "${LAKEHOUSE_S3_SECRET_KEY}", "extra": {"endpoint_url": "http://minio:9000", "region_name": "${AWS_REGION:-us-east-1}", "config_kwargs": {"s3": {"addressing_style": "path"}}}}'
+    AIRFLOW_VAR_PII_HASH_SECRET: ${PII_HASH_SECRET}
+    AIRFLOW_VAR_WABA_COUNTRIES: '["CI", "SN", "ML", "BF", "GN", "TG", "BJ", "GH"]'
+    AIRFLOW_VAR_ICEBERG_REST_URI: http://iceberg-rest:8181
+    AIRFLOW_VAR_ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+    # --- Infrastructure (non sensible)
+    WABA_DOCKER_URL: tcp://docker-proxy:2375
+    WABA_SPARK_NETWORK: waba_waba
+    WABA_SPARK_IMAGE: waba/spark:3.5.3-iceberg1.6.1
+    WABA_INGEST_SCHEDULE: ${WABA_INGEST_SCHEDULE:-*/15 * * * *}
+    SPARK_POOL_SLOTS: ${SPARK_POOL_SLOTS:-1}
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags:ro
+    - ./airflow/tests:/opt/airflow/tests:ro
+    - airflow-logs:/opt/airflow/logs
+    - airflow-auth:/opt/airflow/auth
+  networks: [waba]
+
+services:
+  # ------------------------------------------------------------------ stockage
+  minio:
+    # Build communautaire de MinIO (pgsty/silo) : même API S3, mêmes variables MINIO_*.
+    # Les images officielles minio/minio ne sont plus téléchargeables (sept. 2026).
+    image: pgsty/silo:RELEASE.2026-08-06T00-00-00Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    ports: ["9000:9000", "9001:9001"]
+    volumes: [minio-data:/data]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [waba]
+
+  # Création des buckets + compte de service à privilèges restreints (one-shot)
+  minio-init:
+    build: ./minio
+    image: waba/minio-init:1.0
+    depends_on:
+      minio: { condition: service_healthy }
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      LAKEHOUSE_S3_ACCESS_KEY: ${LAKEHOUSE_S3_ACCESS_KEY}
+      LAKEHOUSE_S3_SECRET_KEY: ${LAKEHOUSE_S3_SECRET_KEY}
+    restart: "no"
+    networks: [waba]
+
+  # ------------------------------------------------------ catalogue Iceberg REST
+  iceberg-rest:
+    image: tabulario/iceberg-rest:1.6.0
+    user: "0:0"  # écriture du fichier SQLite du catalogue dans le volume
+    depends_on:
+      minio-init: { condition: service_completed_successfully }
+    environment:
+      CATALOG_WAREHOUSE: s3://lakehouse/
+      CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
+      CATALOG_S3_ENDPOINT: http://minio:9000
+      CATALOG_S3_PATH__STYLE__ACCESS: "true"
+      # Catalogue persistant (le défaut de l'image est en mémoire)
+      CATALOG_URI: jdbc:sqlite:file:/catalog/iceberg_catalog.db
+      AWS_ACCESS_KEY_ID: ${LAKEHOUSE_S3_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${LAKEHOUSE_S3_SECRET_KEY}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+    ports: ["8181:8181"]
+    volumes: [iceberg-catalog:/catalog]
+    networks: [waba]
+
+  # ---------------------------------------------------------------------- Spark
+  spark-master:
+    <<: *spark
+    hostname: spark-master   # nom résolvable : le driver (client mode) tourne ici
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master",
+              "--host", "spark-master"]
+    ports: ["8080:8080", "7077:7077"]
+    depends_on:
+      minio-init: { condition: service_completed_successfully }
+      iceberg-rest: { condition: service_started }
+
+  spark-worker:
+    <<: *spark
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker",
+              "spark://spark-master:7077", "--cores", "2", "--memory", "2g"]
+    ports: ["8081:8081"]
+    depends_on: [spark-master]
+
+  # ---------------------------------------------------------------------- Trino
+  trino:
+    image: trinodb/trino:460
+    environment:
+      <<: *s3-env
+    ports: ["8088:8080"]
+    volumes:
+      - ./trino/etc/catalog:/etc/trino/catalog:ro
+      - ./trino/etc/kafka:/etc/trino/kafka:ro      # L3 : description des topics (JSON)
+      - ./trino/etc/jvm.config:/etc/trino/jvm.config:ro
+      - ./sql:/sql:ro
+    depends_on:
+      iceberg-rest: { condition: service_started }
+    networks: [waba]
+
+  # ------------------------------------------------------------------ Streamlit
+  generator:
+    build: ./generator
+    image: waba/generator:1.0
+    environment:
+      <<: *s3-env
+      GENERATOR_STATE_DIR: /data/state
+    ports: ["8501:8501"]
+    volumes: [generator-state:/data/state]
+    depends_on:
+      minio-init: { condition: service_completed_successfully }
+    networks: [waba]
+
+  # =========================================================== Level 2 : Airflow
+  airflow-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: ${AIRFLOW_DB_PASSWORD:?AIRFLOW_DB_PASSWORD manquant dans .env}
+      POSTGRES_DB: airflow
+    volumes: [airflow-db:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 20
+    networks: [waba]
+
+  # Accès restreint à l'API Docker pour le DockerOperator (conteneurs + images
+  # uniquement) : Airflow ne monte jamais directement le socket Docker.
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:v0.4.2
+    environment:
+      CONTAINERS: 1
+      IMAGES: 1
+      POST: 1
+    volumes: ["/var/run/docker.sock:/var/run/docker.sock:ro"]
+    networks: [waba]
+
+  airflow-init:
+    <<: *airflow
+    command: ["bash", "/opt/airflow/init.sh"]
+    depends_on:
+      airflow-db: { condition: service_healthy }
+    restart: "no"
+
+  airflow-apiserver:
+    <<: *airflow
+    command: api-server
+    ports: ["8090:8080"]
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/api/v2/version"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    depends_on: &airflow-deps
+      airflow-init: { condition: service_completed_successfully }
+
+  airflow-scheduler:
+    <<: *airflow
+    command: scheduler
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    depends_on:
+      <<: *airflow-deps
+      docker-proxy: { condition: service_started }
+      spark-master: { condition: service_started }
+
+  airflow-dag-processor:
+    <<: *airflow
+    command: dag-processor
+    depends_on: *airflow-deps
+
+  # ================================================ Level 3 : streaming (profil)
+  kafka:
+    image: apache/kafka:4.3.1
+    profiles: [streaming]
+    hostname: kafka
+    user: "0:0"   # écriture dans le volume nommé (créé root) ; broker de développement
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller          # KRaft : pas de ZooKeeper
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      CLUSTER_ID: ${KAFKA_CLUSTER_ID:-MkU3OEVBNTcwNTJENDM2Qg}   # UUID base64 (22 car.)
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"        # topics créés explicitement (kafka-init)
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_HEAP_OPTS: -Xms512m -Xmx1g
+    ports: ["29092:29092"]
+    volumes: [kafka-data:/var/lib/kafka/data]
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+    networks: [waba]
+
+  kafka-init:
+    image: apache/kafka:4.3.1
+    profiles: [streaming]
+    depends_on:
+      kafka: { condition: service_healthy }
+    entrypoint: ["bash", "/scripts/create-topics.sh"]
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    volumes: ["./kafka/create-topics.sh:/scripts/create-topics.sh:ro"]
+    restart: "no"
+    networks: [waba]
+
+  kafka-ui:
+    image: kafbat/kafka-ui:v1.5.0
+    profiles: [streaming]
+    depends_on:
+      kafka: { condition: service_healthy }
+    environment:
+      KAFKA_CLUSTERS_0_NAME: waba
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      DYNAMIC_CONFIG_ENABLED: "false"
+    ports: ["127.0.0.1:8084:8080"]   # UI sans authentification : exposée en local uniquement
+    networks: [waba]
+
+  nifi:
+    image: apache/nifi:2.12.0
+    profiles: [streaming]
+    hostname: nifi
+    environment:
+      NIFI_WEB_HTTPS_PORT: "8443"
+      NIFI_WEB_PROXY_HOST: localhost:8443,127.0.0.1:8443
+      SINGLE_USER_CREDENTIALS_USERNAME: ${NIFI_USERNAME:?NIFI_USERNAME manquant dans .env (make env-upgrade)}
+      SINGLE_USER_CREDENTIALS_PASSWORD: ${NIFI_PASSWORD:?NIFI_PASSWORD manquant dans .env}
+      NIFI_SENSITIVE_PROPS_KEY: ${NIFI_SENSITIVE_PROPS_KEY:?NIFI_SENSITIVE_PROPS_KEY manquant dans .env}
+      NIFI_JVM_HEAP_INIT: 1g
+      NIFI_JVM_HEAP_MAX: 2g
+    ports: ["8443:8443"]
+    volumes:
+      - nifi-conf:/opt/nifi/nifi-current/conf
+      - nifi-state:/opt/nifi/nifi-current/state
+      - nifi-database:/opt/nifi/nifi-current/database_repository
+      - nifi-flowfile:/opt/nifi/nifi-current/flowfile_repository
+      - nifi-content:/opt/nifi/nifi-current/content_repository
+      - nifi-provenance:/opt/nifi/nifi-current/provenance_repository
+    depends_on:
+      minio-init: { condition: service_completed_successfully }
+      kafka-init: { condition: service_completed_successfully }
+    networks: [waba]
+
+  # Crée le flux NiFi par l'API REST (idempotent : ne recrée pas un flux existant)
+  nifi-init:
+    image: python:3.12-alpine
+    profiles: [streaming]
+    command: ["python", "/provision/provision.py"]
+    environment:
+      <<: *s3-env
+      NIFI_URL: https://nifi:8443
+      NIFI_USERNAME: ${NIFI_USERNAME}
+      NIFI_PASSWORD: ${NIFI_PASSWORD}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      NIFI_REPLAY_HISTORY: ${NIFI_REPLAY_HISTORY:-false}
+      NIFI_RECREATE: ${NIFI_RECREATE:-false}
+    volumes: ["./nifi:/provision:ro"]
+    depends_on:
+      nifi: { condition: service_started }
+    restart: "no"
+    networks: [waba]
+
+  # Job 1 : raw-* -> silver-* + Iceberg silver.rt_* (+ DLQ). Conteneur dédié, Spark local :
+  # ne consomme pas les slots du cluster utilisés par les jobs batch d'Airflow.
+  stream-silver:
+    <<: *spark
+    profiles: [streaming]
+    command: ["/opt/spark/bin/spark-submit", "--master", "local[2]", "--driver-memory", "1536m",
+              "--conf", "spark.sql.shuffle.partitions=8",
+              "/opt/waba/jobs/stream_raw_to_silver.py"]
+    environment: &stream-env
+      <<: *spark-env
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      STREAM_CHECKPOINT_DIR: /checkpoints
+      STREAM_TRIGGER_S: ${STREAM_TRIGGER_S:-5}
+    volumes:
+      - ./spark/jobs:/opt/waba/jobs:ro
+      - stream-checkpoints:/checkpoints
+    depends_on:
+      kafka-init: { condition: service_completed_successfully }
+      iceberg-rest: { condition: service_started }
+    restart: unless-stopped   # reprise automatique depuis le checkpoint
+
+  # Job 2 : silver-* -> gold-fraud-alerts / gold-aml-events / gold-liquidity-alerts
+  stream-gold:
+    <<: *spark
+    profiles: [streaming]
+    command: ["/opt/spark/bin/spark-submit", "--master", "local[2]", "--driver-memory", "1536m",
+              "--conf", "spark.sql.shuffle.partitions=8",
+              "/opt/waba/jobs/stream_silver_to_gold.py"]
+    environment: *stream-env
+    volumes:
+      - ./spark/jobs:/opt/waba/jobs:ro
+      - stream-checkpoints:/checkpoints
+    depends_on:
+      kafka-init: { condition: service_completed_successfully }
+      iceberg-rest: { condition: service_started }
+    restart: unless-stopped
+
+volumes:
+  minio-data:
+  iceberg-catalog:
+  generator-state:
+  airflow-db:
+  airflow-logs:
+  airflow-auth:
+  kafka-data:
+  nifi-conf:
+  nifi-state:
+  nifi-database:
+  nifi-flowfile:
+  nifi-content:
+  nifi-provenance:
+  stream-checkpoints:
+
+networks:
+  waba:

@@ -1,0 +1,64 @@
+# Catalogue Iceberg REST (partagé par Spark et Trino), métadonnées SQLite sur PVC.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: iceberg-catalog
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: {requests: {storage: 1Gi}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: iceberg-rest
+  labels: {app: iceberg-rest}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}       # SQLite : un seul écrivain
+  selector:
+    matchLabels: {app: iceberg-rest}
+  template:
+    metadata:
+      labels: {app: iceberg-rest}
+    spec:
+      securityContext: {runAsUser: 0}   # écriture du fichier SQLite dans le volume (comme en compose)
+      containers:
+        - name: iceberg-rest
+          image: tabulario/iceberg-rest:1.6.0
+          env:
+            - {name: CATALOG_WAREHOUSE, value: "s3://lakehouse/"}
+            - {name: CATALOG_IO__IMPL, value: org.apache.iceberg.aws.s3.S3FileIO}
+            - {name: CATALOG_S3_ENDPOINT, value: "http://minio.ingestion.svc.cluster.local:9000"}
+            - {name: CATALOG_S3_PATH__STYLE__ACCESS, value: "true"}
+            - {name: CATALOG_URI, value: "jdbc:sqlite:file:/catalog/iceberg_catalog.db"}
+            - {name: AWS_REGION, value: us-east-1}
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom: {secretKeyRef: {name: waba-spark-env, key: S3_ACCESS_KEY}}
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom: {secretKeyRef: {name: waba-spark-env, key: S3_SECRET_KEY}}
+          ports:
+            - {containerPort: 8181, name: http}
+          readinessProbe:
+            httpGet: {path: /v1/config, port: 8181}
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: {port: 8181}
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {memory: 768Mi}
+          volumeMounts:
+            - {name: catalog, mountPath: /catalog}
+      volumes:
+        - name: catalog
+          persistentVolumeClaim: {claimName: iceberg-catalog}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: iceberg-rest
+spec:
+  selector: {app: iceberg-rest}
+  ports:
+    - {name: http, port: 8181, targetPort: 8181}

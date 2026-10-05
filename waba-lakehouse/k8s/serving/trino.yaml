@@ -1,0 +1,74 @@
+# Trino 460 : coordinateur unique. Sondes : startup/readiness = script health-check de
+# l'image (état du serveur), liveness = /v1/info (public, sans authentification).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trino
+  labels: {app: trino}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: trino}
+  template:
+    metadata:
+      labels: {app: trino, trino-role: coordinator}
+    spec:
+      securityContext: {runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000}
+      containers:
+        - name: trino
+          image: trinodb/trino:460
+          envFrom:
+            - secretRef: {name: trino-env}
+          ports:
+            - {containerPort: 8080, name: http}
+            - {containerPort: 8443, name: https}
+          startupProbe:
+            exec: {command: ["/usr/lib/trino/bin/health-check"]}
+            periodSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            exec: {command: ["/usr/lib/trino/bin/health-check"]}
+            periodSeconds: 15
+            timeoutSeconds: 10
+          livenessProbe:
+            httpGet: {path: /v1/info, port: 8080}
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 4
+          resources:
+            requests: {cpu: 500m, memory: 2Gi}
+            limits: {memory: 3Gi}
+          volumeMounts:
+            - {name: config, mountPath: /etc/trino}
+            - {name: catalogs, mountPath: /etc/trino/catalog}
+            - {name: kafka-tables, mountPath: /etc/trino/kafka}
+            - {name: access, mountPath: /etc/trino/access}
+            - {name: auth, mountPath: /etc/trino/auth}
+            - {name: tls, mountPath: /etc/trino/tls}
+            - {name: data, mountPath: /data/trino}
+      volumes:
+        - name: config
+          configMap: {name: trino-config}
+        - name: catalogs
+          configMap: {name: trino-catalogs}
+        - name: kafka-tables
+          configMap: {name: trino-kafka-tables}
+        - name: access
+          configMap: {name: trino-access}
+        - name: auth
+          secret: {secretName: trino-auth}          # password.db (hachages PBKDF2)
+        - name: tls
+          secret: {secretName: trino-tls}           # trino.pem (clé + certificat)
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: trino
+  labels: {app: trino}
+spec:
+  selector: {app: trino}
+  ports:
+    - {name: http, port: 8080, targetPort: 8080}
+    - {name: https, port: 8443, targetPort: 8443}

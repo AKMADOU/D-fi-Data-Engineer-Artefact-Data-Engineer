@@ -1,0 +1,55 @@
+# Tests unitaires des 3 alertes (promtool test rules). Temps : secondes depuis
+# 1970-01-01T00:00Z ; 1 jour = 86400 s.
+rule_files: [alert-rules.yml]
+evaluation_interval: 1m
+tests:
+  # --- 1. Job Spark fraude : tourne 10 min, puis le pod disparaît
+  - interval: 1m
+    input_series:
+      - series: 'up{app="stream-gold",job="kubernetes-pods"}'
+        values: '1x10'
+      - series: 'waba_stream_last_progress_timestamp_seconds{stream_job="silver_to_gold",query="event_rules"}'
+        values: '0+60x10'
+    alert_rule_test:
+      - {eval_time: 8m, alertname: SparkFraudDown, exp_alerts: []}
+      - {eval_time: 14m, alertname: SparkFraudDown, exp_alerts: []}      # en attente (for: 5m)
+      - eval_time: 18m
+        alertname: SparkFraudDown
+        exp_alerts: [{exp_labels: {}}]
+  # --- 2. Lag AML : 1 200 puis 8 000 messages en attente
+  - interval: 1m
+    input_series:
+      - series: 'waba_stream_kafka_lag_messages{stream_job="silver_to_gold",query="event_rules",topic="silver-bank-transactions"}'
+        values: '1200x5 6000x10'
+      - series: 'waba_stream_kafka_lag_messages{stream_job="silver_to_gold",query="event_rules",topic="silver-mobile-money"}'
+        values: '0x5 2000x10'
+      - series: 'waba_stream_kafka_lag_messages{stream_job="silver_to_gold",query="fraud_bursts",topic="silver-bank-transactions"}'
+        values: '90000x15'                                   # autre requête : ignorée
+    alert_rule_test:
+      - {eval_time: 4m, alertname: AmlConsumerLag, exp_alerts: []}
+      - eval_time: 9m
+        alertname: AmlConsumerLag
+        exp_alerts: [{exp_labels: {}}]
+  # --- 3. Reporting J+1 : succès à 00h45 le jour 0, rien le jour 1
+  - interval: 5m
+    input_series:
+      - series: 'waba_dag_last_success_timestamp_seconds{dag_id="dag_regulatory_report",job="airflow"}'
+        values: '_x8 2700x400'                     # poussé à 00h45 (jour 0)
+    alert_rule_test:
+      - {eval_time: 7h, alertname: RegulatoryReportFailed, exp_alerts: []}           # jour 0, OK
+      - {eval_time: 29h, alertname: RegulatoryReportFailed, exp_alerts: []}          # jour 1, 05h00 : trop tôt
+      - eval_time: 31h                                                               # jour 1, 07h00
+        alertname: RegulatoryReportFailed
+        exp_alerts: [{exp_labels: {}}]
+  # --- 3 bis. Échec explicite du DAG (callback Airflow -> Pushgateway), avant 06h00
+  - interval: 5m
+    input_series:
+      - series: 'waba_dag_last_success_timestamp_seconds{dag_id="dag_regulatory_report",job="airflow"}'
+        values: '2700x100'
+      - series: 'waba_dag_last_failure_timestamp_seconds{dag_id="dag_regulatory_report",job="airflow"}'
+        values: '_x20 6000x80'                     # échec à 01h40
+    alert_rule_test:
+      - {eval_time: 1h, alertname: RegulatoryReportFailed, exp_alerts: []}
+      - eval_time: 2h
+        alertname: RegulatoryReportFailed
+        exp_alerts: [{exp_labels: {}}]

@@ -1,0 +1,140 @@
+# Level 3 sur Kubernetes : les 2 jobs Structured Streaming, drivers longue durée.
+# Spark en mode local dans le pod : ne consomme pas les ressources des jobs batch
+# (lancés par le Spark Operator). Sondes sur le serveur HTTP du driver
+# (common/metrics.py) : /ready = requêtes actives et progression < 2 min,
+# /healthz = pas d'arrêt en erreur ni de blocage > 10 min.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: stream-silver-checkpoints
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: {requests: {storage: 2Gi}}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: stream-gold-checkpoints
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: {requests: {storage: 2Gi}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: streaming-config
+data:
+  KAFKA_BOOTSTRAP_SERVERS: kafka.ingestion.svc.cluster.local:9092
+  STREAM_CHECKPOINT_DIR: /checkpoints
+  STREAM_TRIGGER_S: "5"
+  STREAM_EVENTS_MAX_OFFSETS: "20000"
+  METRICS_PORT: "9108"
+  PYSPARK_PYTHON: python3
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stream-silver
+  labels: {app: stream-silver, spark-role: streaming-driver}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}      # un seul driver par checkpoint
+  selector:
+    matchLabels: {app: stream-silver}
+  template:
+    metadata:
+      labels: {app: stream-silver, spark-role: streaming-driver, waba/job: raw-to-silver}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9108"
+        prometheus.io/path: /metrics
+        waba/log-format: json
+    spec:
+      securityContext: {fsGroup: 185}
+      containers:
+        - name: driver
+          image: waba/spark:3.5.3-iceberg1.6.1
+          imagePullPolicy: IfNotPresent
+          command: ["/opt/spark/bin/spark-submit", "--master", "local[2]",
+                    "--driver-memory", "1536m", "--conf", "spark.sql.shuffle.partitions=8",
+                    "/opt/waba/jobs/stream_raw_to_silver.py"]
+          envFrom:
+            - configMapRef: {name: streaming-config}
+            - secretRef: {name: waba-spark-env}
+          ports:
+            - {containerPort: 9108, name: metrics}
+            - {containerPort: 4040, name: spark-ui}
+          startupProbe:
+            httpGet: {path: /healthz, port: 9108}
+            periodSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: {path: /ready, port: 9108}
+            periodSeconds: 15
+            failureThreshold: 4
+          livenessProbe:
+            httpGet: {path: /healthz, port: 9108}
+            periodSeconds: 30
+            failureThreshold: 4
+          resources:
+            requests: {cpu: 500m, memory: 1536Mi}
+            limits: {memory: 2560Mi}
+          volumeMounts:
+            - {name: checkpoints, mountPath: /checkpoints}
+      volumes:
+        - name: checkpoints
+          persistentVolumeClaim: {claimName: stream-silver-checkpoints}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stream-gold
+  labels: {app: stream-gold, spark-role: streaming-driver}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: stream-gold}
+  template:
+    metadata:
+      labels: {app: stream-gold, spark-role: streaming-driver, waba/job: silver-to-gold}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9108"
+        prometheus.io/path: /metrics
+        waba/log-format: json
+    spec:
+      securityContext: {fsGroup: 185}
+      containers:
+        - name: driver
+          image: waba/spark:3.5.3-iceberg1.6.1
+          imagePullPolicy: IfNotPresent
+          command: ["/opt/spark/bin/spark-submit", "--master", "local[2]",
+                    "--driver-memory", "1536m", "--conf", "spark.sql.shuffle.partitions=8",
+                    "/opt/waba/jobs/stream_silver_to_gold.py"]
+          envFrom:
+            - configMapRef: {name: streaming-config}
+            - secretRef: {name: waba-spark-env}
+          ports:
+            - {containerPort: 9108, name: metrics}
+            - {containerPort: 4040, name: spark-ui}
+          startupProbe:
+            httpGet: {path: /healthz, port: 9108}
+            periodSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: {path: /ready, port: 9108}
+            periodSeconds: 15
+            failureThreshold: 4
+          livenessProbe:
+            httpGet: {path: /healthz, port: 9108}
+            periodSeconds: 30
+            failureThreshold: 4
+          resources:
+            requests: {cpu: 500m, memory: 1536Mi}
+            limits: {memory: 2560Mi}
+          volumeMounts:
+            - {name: checkpoints, mountPath: /checkpoints}
+      volumes:
+        - name: checkpoints
+          persistentVolumeClaim: {claimName: stream-gold-checkpoints}

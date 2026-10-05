@@ -1,0 +1,93 @@
+{
+  "tableName": "gold-liquidity-alerts",
+  "schemaName": "default",
+  "topicName": "gold-liquidity-alerts",
+  "message": {
+    "dataFormat": "json",
+    "fields": [
+      {
+        "name": "alert_id",
+        "mapping": "alert_id",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "rule",
+        "mapping": "rule",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "severity",
+        "mapping": "severity",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "country_code",
+        "mapping": "country_code",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "entity_type",
+        "mapping": "entity_type",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "subject_key",
+        "mapping": "subject_key",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "window_start",
+        "mapping": "window_start",
+        "type": "TIMESTAMP",
+        "dataFormat": "custom-date-time",
+        "formatHint": "yyyy-MM-dd'T'HH:mm:ss.SSS"
+      },
+      {
+        "name": "window_end",
+        "mapping": "window_end",
+        "type": "TIMESTAMP",
+        "dataFormat": "custom-date-time",
+        "formatHint": "yyyy-MM-dd'T'HH:mm:ss.SSS"
+      },
+      {
+        "name": "event_time",
+        "mapping": "event_time",
+        "type": "TIMESTAMP",
+        "dataFormat": "custom-date-time",
+        "formatHint": "yyyy-MM-dd'T'HH:mm:ss.SSS"
+      },
+      {
+        "name": "amount_eur",
+        "mapping": "amount_eur",
+        "type": "DOUBLE"
+      },
+      {
+        "name": "amount_local",
+        "mapping": "amount_local",
+        "type": "DOUBLE"
+      },
+      {
+        "name": "currency",
+        "mapping": "currency",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "threshold",
+        "mapping": "threshold",
+        "type": "DOUBLE"
+      },
+      {
+        "name": "details",
+        "mapping": "details",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "detected_at",
+        "mapping": "detected_at",
+        "type": "TIMESTAMP",
+        "dataFormat": "custom-date-time",
+        "formatHint": "yyyy-MM-dd'T'HH:mm:ss.SSS"
+      }
+    ]
+  }
+}

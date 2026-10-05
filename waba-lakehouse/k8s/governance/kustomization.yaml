@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: governance
+labels:
+  - pairs: {app.kubernetes.io/part-of: waba, waba/domain: governance}
+    includeSelectors: false
+resources:
+  - postgres.yaml
+  - keycloak.yaml
+  - openmetadata.yaml
+  - ingress.yaml
+generatorOptions:
+  disableNameSuffixHash: true
+configMapGenerator:
+  - name: keycloak-realm
+    files:
+      - keycloak/waba-realm.json

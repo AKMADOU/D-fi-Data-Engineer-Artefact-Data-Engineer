@@ -1,0 +1,52 @@
+{
+  "tableName": "dlq-financial-events",
+  "schemaName": "default",
+  "topicName": "dlq-financial-events",
+  "message": {
+    "dataFormat": "json",
+    "fields": [
+      {
+        "name": "stage",
+        "mapping": "stage",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "dataset",
+        "mapping": "dataset",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "source",
+        "mapping": "source",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "record_key",
+        "mapping": "record_key",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "country_code",
+        "mapping": "country_code",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "reject_reason",
+        "mapping": "reject_reason",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "raw_record",
+        "mapping": "raw_record",
+        "type": "VARCHAR"
+      },
+      {
+        "name": "detected_at",
+        "mapping": "detected_at",
+        "type": "TIMESTAMP",
+        "dataFormat": "custom-date-time",
+        "formatHint": "yyyy-MM-dd'T'HH:mm:ss.SSS"
+      }
+    ]
+  }
+}

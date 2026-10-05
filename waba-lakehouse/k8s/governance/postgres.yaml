@@ -1,0 +1,74 @@
+# PostgreSQL de la gouvernance : bases keycloak et openmetadata_db (PVC).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: governance-db-init
+data:
+  01-databases.sh: |
+    #!/bin/sh
+    # Exécuté une seule fois, à la création du volume.
+    set -eu
+    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" <<SQL
+    CREATE USER keycloak WITH PASSWORD '${KEYCLOAK_DB_PASSWORD}';
+    CREATE DATABASE keycloak OWNER keycloak;
+    CREATE USER openmetadata_user WITH PASSWORD '${OM_DB_PASSWORD}';
+    CREATE DATABASE openmetadata_db OWNER openmetadata_user;
+    SQL
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: governance-db
+spec:
+  selector: {app: governance-db}
+  ports:
+    - {name: postgres, port: 5432, targetPort: 5432}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: governance-db
+  labels: {app: governance-db}
+spec:
+  serviceName: governance-db
+  replicas: 1
+  selector:
+    matchLabels: {app: governance-db}
+  template:
+    metadata:
+      labels: {app: governance-db}
+    spec:
+      securityContext: {fsGroup: 70}
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          env:
+            - {name: POSTGRES_USER, value: postgres}
+            - {name: PGDATA, value: /var/lib/postgresql/data/pgdata}
+            - name: POSTGRES_PASSWORD
+              valueFrom: {secretKeyRef: {name: governance-env, key: POSTGRES_PASSWORD}}
+            - name: KEYCLOAK_DB_PASSWORD
+              valueFrom: {secretKeyRef: {name: governance-env, key: KC_DB_PASSWORD}}
+            - name: OM_DB_PASSWORD
+              valueFrom: {secretKeyRef: {name: governance-env, key: DB_USER_PASSWORD}}
+          readinessProbe:
+            exec: {command: ["pg_isready", "-U", "postgres"]}
+            periodSeconds: 10
+          livenessProbe:
+            exec: {command: ["pg_isready", "-U", "postgres"]}
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {memory: 768Mi}
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/postgresql/data}
+            - {name: init, mountPath: /docker-entrypoint-initdb.d}
+      volumes:
+        - name: init
+          configMap: {name: governance-db-init}
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: {requests: {storage: 5Gi}}
